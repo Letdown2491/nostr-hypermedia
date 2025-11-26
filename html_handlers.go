@@ -68,7 +68,7 @@ func htmlTimelineHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Always fetch profiles, only fetch reactions/reply counts in full mode
+	// Always fetch profiles and reply counts, only fetch reactions in full mode
 	profiles := make(map[string]*ProfileInfo)
 	reactions := make(map[string]*ReactionsSummary)
 	replyCounts := make(map[string]int)
@@ -87,17 +87,21 @@ func htmlTimelineHandler(w http.ResponseWriter, r *http.Request) {
 		}()
 	}
 
+	// Always fetch reply counts (they're useful navigation)
+	if len(eventIDs) > 0 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			replyCounts = fetchReplyCounts(relays, eventIDs)
+		}()
+	}
+
+	// Only fetch reactions in full mode (slower)
 	if !fast && len(eventIDs) > 0 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			reactions = fetchReactions(relays, eventIDs)
-		}()
-
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			replyCounts = fetchReplyCounts(relays, eventIDs)
 		}()
 	}
 

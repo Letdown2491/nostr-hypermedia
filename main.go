@@ -29,6 +29,10 @@ func main() {
 		}
 	})
 	http.HandleFunc("/html/timeline", htmlTimelineHandler)
+	http.HandleFunc("/html/thread/", htmlThreadHandler)
+	http.HandleFunc("/html/login", htmlLoginHandler)
+	http.HandleFunc("/html/logout", htmlLogoutHandler)
+	http.HandleFunc("/html/post", htmlPostNoteHandler)
 	http.HandleFunc("/health", healthHandler)
 
 	log.Printf("Starting server on :%s", port)

@@ -1,8 +1,11 @@
 package main
 
 import (
+	"encoding/hex"
 	"fmt"
+	"html"
 	"html/template"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -87,6 +90,19 @@ var htmlTemplate = `<!DOCTYPE html>
       color: #24292e;
       white-space: pre-wrap;
       word-wrap: break-word;
+    }
+    .note-content img {
+      max-width: 100%;
+      border-radius: 8px;
+      margin: 8px 0;
+      display: block;
+    }
+    .note-content a {
+      color: #667eea;
+      text-decoration: none;
+    }
+    .note-content a:hover {
+      text-decoration: underline;
     }
     .note-author {
       display: flex;
@@ -256,10 +272,33 @@ var htmlTemplate = `<!DOCTYPE html>
     <nav>
       <a href="/html/timeline?kinds=1&limit=20&fast=1">Timeline</a>
       <a href="/html/timeline?kinds=1&limit=10">Full (slow)</a>
+      {{if .LoggedIn}}
+      <a href="/html/logout">Logout</a>
+      {{else}}
+      <a href="/html/login">Login</a>
+      {{end}}
       <a href="/">JS Client</a>
     </nav>
 
     <main>
+      {{if .Error}}
+      <div style="background:#fee2e2;color:#dc2626;border:1px solid #fecaca;padding:12px;border-radius:4px;margin-bottom:16px;">{{.Error}}</div>
+      {{end}}
+      {{if .Success}}
+      <div style="background:#dcfce7;color:#16a34a;border:1px solid #bbf7d0;padding:12px;border-radius:4px;margin-bottom:16px;">{{.Success}}</div>
+      {{end}}
+
+      {{if .LoggedIn}}
+      <form method="POST" action="/html/post" style="background:#f8f9fa;padding:16px;border-radius:8px;border:1px solid #dee2e6;margin-bottom:20px;">
+        <div style="margin-bottom:10px;font-size:13px;color:#666;">
+          Posting as: <span style="font-family:monospace;color:#667eea;">{{slice .UserPubKey 0 12}}...</span>
+        </div>
+        <textarea name="content" placeholder="What's on your mind?" required
+                  style="width:100%;padding:12px;border:1px solid #ced4da;border-radius:4px;font-size:14px;font-family:inherit;min-height:80px;resize:vertical;margin-bottom:10px;"></textarea>
+        <button type="submit" style="padding:10px 20px;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:white;border:none;border-radius:4px;font-size:14px;font-weight:600;cursor:pointer;">Post Note</button>
+      </form>
+      {{end}}
+
       {{if .Meta}}
       <div class="meta-info">
         {{if .Meta.QueriedRelays}}
@@ -296,11 +335,16 @@ var htmlTemplate = `<!DOCTYPE html>
             <span class="pubkey" title="{{.Pubkey}}">{{slice .Pubkey 0 12}}...</span>
           </div>
         </div>
-        <div class="note-content">{{.Content}}</div>
-        {{if and .Reactions (gt .Reactions.Total 0)}}
+        <div class="note-content">{{.ContentHTML}}</div>
+        {{if or (and .Reactions (gt .Reactions.Total 0)) (gt .ReplyCount 0)}}
         <div class="note-reactions">
+          {{if gt .ReplyCount 0}}
+          <a href="/html/thread/{{.ID}}" class="reaction-badge" style="text-decoration:none;">replies {{.ReplyCount}}</a>
+          {{end}}
+          {{if and .Reactions (gt .Reactions.Total 0)}}
           {{range $type, $count := .Reactions.ByType}}
           <span class="reaction-badge">{{$type}} {{$count}}</span>
+          {{end}}
           {{end}}
         </div>
         {{end}}
@@ -368,6 +412,10 @@ type HTMLPageData struct {
 	Pagination *HTMLPagination
 	Actions    []HTMLAction
 	Links      []string
+	LoggedIn   bool
+	UserPubKey string
+	Error      string
+	Success    string
 }
 
 type HTMLEventItem struct {
@@ -376,10 +424,12 @@ type HTMLEventItem struct {
 	Pubkey        string
 	CreatedAt     int64
 	Content       string
+	ContentHTML   template.HTML
 	RelaysSeen    []string
 	Links         []string
 	AuthorProfile *ProfileInfo
 	Reactions     *ReactionsSummary
+	ReplyCount    int
 }
 
 type HTMLPagination struct {
@@ -399,7 +449,29 @@ type HTMLField struct {
 	Value string
 }
 
-func renderHTML(resp TimelineResponse, relays []string, authors []string, kinds []int, limit int) (string, error) {
+// Image extension regex
+var imageExtRegex = regexp.MustCompile(`(?i)\.(jpg|jpeg|png|gif|webp)(\?.*)?$`)
+var urlRegex = regexp.MustCompile(`https?://[^\s<>"]+`)
+
+// processContentToHTML converts plain text content to HTML with images and links
+func processContentToHTML(content string) template.HTML {
+	// First escape the content
+	escaped := html.EscapeString(content)
+
+	// Find all URLs and replace them
+	result := urlRegex.ReplaceAllStringFunc(escaped, func(url string) string {
+		// Unescape the URL (it was escaped above)
+		url = html.UnescapeString(url)
+		if imageExtRegex.MatchString(url) {
+			return fmt.Sprintf(`<img src="%s" alt="image" loading="lazy">`, html.EscapeString(url))
+		}
+		return fmt.Sprintf(`<a href="%s" target="_blank" rel="noopener">%s</a>`, html.EscapeString(url), html.EscapeString(url))
+	})
+
+	return template.HTML(result)
+}
+
+func renderHTML(resp TimelineResponse, relays []string, authors []string, kinds []int, limit int, session *BunkerSession, errorMsg, successMsg string) (string, error) {
 	// Convert to HTML page data
 	items := make([]HTMLEventItem, len(resp.Items))
 	for i, item := range resp.Items {
@@ -409,10 +481,12 @@ func renderHTML(resp TimelineResponse, relays []string, authors []string, kinds 
 			Pubkey:        item.Pubkey,
 			CreatedAt:     item.CreatedAt,
 			Content:       item.Content,
+			ContentHTML:   processContentToHTML(item.Content),
 			RelaysSeen:    item.RelaysSeen,
 			Links:         []string{},
 			AuthorProfile: item.AuthorProfile,
 			Reactions:     item.Reactions,
+			ReplyCount:    item.ReplyCount,
 		}
 
 		// Add profile link
@@ -430,8 +504,9 @@ func renderHTML(resp TimelineResponse, relays []string, authors []string, kinds 
 	// Build pagination
 	var pagination *HTMLPagination
 	if resp.Page.Next != nil {
+		// Page.Next is already the HTML path from html_handlers.go
 		pagination = &HTMLPagination{
-			Next: strings.Replace(*resp.Page.Next, "/timeline", "/html/timeline", 1),
+			Next: *resp.Page.Next,
 		}
 	}
 
@@ -441,6 +516,14 @@ func renderHTML(resp TimelineResponse, relays []string, authors []string, kinds 
 		Items:      items,
 		Pagination: pagination,
 		Actions:    []HTMLAction{},
+		Error:      errorMsg,
+		Success:    successMsg,
+	}
+
+	// Add session info if logged in
+	if session != nil && session.Connected {
+		data.LoggedIn = true
+		data.UserPubKey = hex.EncodeToString(session.UserPubKey)
 	}
 
 	// Template functions
@@ -478,6 +561,341 @@ func renderHTML(resp TimelineResponse, relays []string, authors []string, kinds 
 	}
 
 	tmpl, err := template.New("html").Funcs(funcMap).Parse(htmlTemplate)
+	if err != nil {
+		return "", err
+	}
+
+	var buf strings.Builder
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return "", err
+	}
+
+	return buf.String(), nil
+}
+
+var htmlThreadTemplate = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Thread - Nostr Hypermedia</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      line-height: 1.6;
+      color: #333;
+      background: #f5f5f5;
+      padding: 20px;
+    }
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      overflow: hidden;
+    }
+    header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 30px;
+      text-align: center;
+    }
+    header h1 { font-size: 28px; margin-bottom: 8px; }
+    .subtitle { opacity: 0.9; font-size: 14px; }
+    nav {
+      padding: 15px;
+      background: #f8f9fa;
+      border-bottom: 1px solid #dee2e6;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    nav a {
+      padding: 8px 16px;
+      background: #667eea;
+      color: white;
+      text-decoration: none;
+      border-radius: 4px;
+      font-size: 14px;
+      transition: background 0.2s;
+    }
+    nav a:hover { background: #5568d3; }
+    main { padding: 20px; min-height: 400px; }
+    .meta-info {
+      background: #f8f9fa;
+      padding: 12px;
+      border-radius: 4px;
+      font-size: 13px;
+      color: #666;
+      margin: 16px 0;
+      display: flex;
+      gap: 16px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .meta-item { display: flex; align-items: center; gap: 4px; }
+    .meta-label { font-weight: 600; }
+    .note {
+      background: white;
+      border: 1px solid #e1e4e8;
+      border-radius: 6px;
+      padding: 16px;
+      margin: 12px 0;
+      transition: box-shadow 0.2s;
+    }
+    .note:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+    .note.root {
+      border: 2px solid #667eea;
+      background: #f8f9ff;
+    }
+    .note-content {
+      font-size: 15px;
+      line-height: 1.6;
+      margin: 12px 0;
+      color: #24292e;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+    .note-content img {
+      max-width: 100%;
+      border-radius: 8px;
+      margin: 8px 0;
+      display: block;
+    }
+    .note-content a {
+      color: #667eea;
+      text-decoration: none;
+    }
+    .note-content a:hover {
+      text-decoration: underline;
+    }
+    .note-author {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .author-avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      object-fit: cover;
+      border: 2px solid #e1e4e8;
+    }
+    .author-info {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .author-name {
+      font-weight: 600;
+      font-size: 15px;
+      color: #24292e;
+    }
+    .author-nip05 {
+      font-size: 12px;
+      color: #667eea;
+    }
+    .note-meta {
+      display: flex;
+      gap: 16px;
+      font-size: 12px;
+      color: #666;
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid #e1e4e8;
+      flex-wrap: wrap;
+    }
+    .pubkey {
+      font-family: monospace;
+      font-size: 11px;
+      color: #667eea;
+    }
+    .replies-section {
+      margin-top: 24px;
+      padding-top: 20px;
+      border-top: 2px solid #e1e4e8;
+    }
+    .replies-section h3 {
+      color: #555;
+      font-size: 16px;
+      margin-bottom: 16px;
+    }
+    .reply {
+      margin-left: 20px;
+      border-left: 3px solid #e1e4e8;
+      padding-left: 16px;
+    }
+    footer {
+      text-align: center;
+      padding: 20px;
+      background: #f8f9fa;
+      color: #666;
+      font-size: 13px;
+      border-top: 1px solid #dee2e6;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Thread</h1>
+      <p class="subtitle">Zero-JS Hypermedia Browser</p>
+    </header>
+
+    <nav>
+      <a href="/html/timeline?kinds=1&limit=20&fast=1">← Timeline</a>
+      <a href="/">JS Client</a>
+    </nav>
+
+    <main>
+      {{if .Meta}}
+      <div class="meta-info">
+        {{if .Meta.QueriedRelays}}
+        <div class="meta-item">
+          <span class="meta-label">Relays:</span> {{.Meta.QueriedRelays}}
+        </div>
+        {{end}}
+        <div class="meta-item">
+          <span class="meta-label">Replies:</span> {{len .Replies}}
+        </div>
+        <div class="meta-item">
+          <span class="meta-label">Generated:</span> {{.Meta.GeneratedAt.Format "15:04:05"}}
+        </div>
+      </div>
+      {{end}}
+
+      {{if .Root}}
+      <article class="note root">
+        <div class="note-author">
+          {{if and .Root.AuthorProfile .Root.AuthorProfile.Picture}}
+          <img class="author-avatar" src="{{.Root.AuthorProfile.Picture}}" alt="avatar" onerror="this.style.display='none'">
+          {{end}}
+          <div class="author-info">
+            {{if .Root.AuthorProfile}}
+            {{if or .Root.AuthorProfile.DisplayName .Root.AuthorProfile.Name}}
+            <span class="author-name">{{if .Root.AuthorProfile.DisplayName}}{{.Root.AuthorProfile.DisplayName}}{{else}}{{.Root.AuthorProfile.Name}}{{end}}</span>
+            {{end}}
+            {{if .Root.AuthorProfile.Nip05}}
+            <span class="author-nip05">{{.Root.AuthorProfile.Nip05}}</span>
+            {{end}}
+            {{end}}
+            <span class="pubkey" title="{{.Root.Pubkey}}">{{slice .Root.Pubkey 0 12}}...</span>
+          </div>
+        </div>
+        <div class="note-content">{{.Root.ContentHTML}}</div>
+        <div class="note-meta">
+          <span>{{formatTime .Root.CreatedAt}}</span>
+          {{if .Root.RelaysSeen}}
+          <span title="{{join .Root.RelaysSeen ", "}}">from {{len .Root.RelaysSeen}} relay(s)</span>
+          {{end}}
+        </div>
+      </article>
+      {{end}}
+
+      {{if .Replies}}
+      <div class="replies-section">
+        <h3>Replies ({{len .Replies}})</h3>
+        {{range .Replies}}
+        <article class="note reply">
+          <div class="note-author">
+            {{if and .AuthorProfile .AuthorProfile.Picture}}
+            <img class="author-avatar" src="{{.AuthorProfile.Picture}}" alt="avatar" onerror="this.style.display='none'">
+            {{end}}
+            <div class="author-info">
+              {{if .AuthorProfile}}
+              {{if or .AuthorProfile.DisplayName .AuthorProfile.Name}}
+              <span class="author-name">{{if .AuthorProfile.DisplayName}}{{.AuthorProfile.DisplayName}}{{else}}{{.AuthorProfile.Name}}{{end}}</span>
+              {{end}}
+              {{if .AuthorProfile.Nip05}}
+              <span class="author-nip05">{{.AuthorProfile.Nip05}}</span>
+              {{end}}
+              {{end}}
+              <span class="pubkey" title="{{.Pubkey}}">{{slice .Pubkey 0 12}}...</span>
+            </div>
+          </div>
+          <div class="note-content">{{.ContentHTML}}</div>
+          <div class="note-meta">
+            <span>{{formatTime .CreatedAt}}</span>
+            {{if .RelaysSeen}}
+            <span title="{{join .RelaysSeen ", "}}">from {{len .RelaysSeen}} relay(s)</span>
+            {{end}}
+          </div>
+        </article>
+        {{end}}
+      </div>
+      {{end}}
+    </main>
+
+    <footer>
+      <p>Pure HTML hypermedia - no JavaScript required</p>
+    </footer>
+  </div>
+</body>
+</html>
+`
+
+type HTMLThreadData struct {
+	Title   string
+	Meta    *MetaInfo
+	Root    *HTMLEventItem
+	Replies []HTMLEventItem
+}
+
+func renderThreadHTML(resp ThreadResponse) (string, error) {
+	// Convert root to HTML item
+	root := &HTMLEventItem{
+		ID:            resp.Root.ID,
+		Kind:          resp.Root.Kind,
+		Pubkey:        resp.Root.Pubkey,
+		CreatedAt:     resp.Root.CreatedAt,
+		Content:       resp.Root.Content,
+		ContentHTML:   processContentToHTML(resp.Root.Content),
+		RelaysSeen:    resp.Root.RelaysSeen,
+		AuthorProfile: resp.Root.AuthorProfile,
+	}
+
+	// Convert replies to HTML items
+	replies := make([]HTMLEventItem, len(resp.Replies))
+	for i, item := range resp.Replies {
+		replies[i] = HTMLEventItem{
+			ID:            item.ID,
+			Kind:          item.Kind,
+			Pubkey:        item.Pubkey,
+			CreatedAt:     item.CreatedAt,
+			Content:       item.Content,
+			ContentHTML:   processContentToHTML(item.Content),
+			RelaysSeen:    item.RelaysSeen,
+			AuthorProfile: item.AuthorProfile,
+		}
+	}
+
+	data := HTMLThreadData{
+		Title:   "Thread",
+		Meta:    &resp.Meta,
+		Root:    root,
+		Replies: replies,
+	}
+
+	// Template functions
+	funcMap := template.FuncMap{
+		"formatTime": func(ts int64) string {
+			return time.Unix(ts, 0).Format("2006-01-02 15:04:05")
+		},
+		"slice": func(s string, start, end int) string {
+			if end > len(s) {
+				end = len(s)
+			}
+			return s[start:end]
+		},
+		"join": func(arr []string, sep string) string {
+			return strings.Join(arr, sep)
+		},
+	}
+
+	tmpl, err := template.New("thread").Funcs(funcMap).Parse(htmlThreadTemplate)
 	if err != nil {
 		return "", err
 	}

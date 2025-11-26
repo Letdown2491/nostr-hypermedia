@@ -578,6 +578,123 @@ func fetchReactionsFromRelay(ctx context.Context, relayURL string, eventIDs []st
 	}
 }
 
+// fetchReplies fetches kind 1 replies to the given event IDs
+func fetchReplies(relays []string, eventIDs []string) []Event {
+	if len(eventIDs) == 0 {
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var wg sync.WaitGroup
+	eventChan := make(chan Event, 1000)
+
+	for _, relay := range relays {
+		wg.Add(1)
+		go func(relayURL string) {
+			defer wg.Done()
+			fetchRepliesFromRelay(ctx, relayURL, eventIDs, eventChan)
+		}(relay)
+	}
+
+	go func() {
+		wg.Wait()
+		close(eventChan)
+	}()
+
+	seenIDs := make(map[string]bool)
+	events := []Event{}
+
+collectLoop:
+	for {
+		select {
+		case evt, ok := <-eventChan:
+			if !ok {
+				break collectLoop
+			}
+			if !seenIDs[evt.ID] {
+				seenIDs[evt.ID] = true
+				events = append(events, evt)
+			}
+		case <-ctx.Done():
+			log.Printf("Replies fetch timeout, got %d events", len(events))
+			break collectLoop
+		}
+	}
+
+	log.Printf("Fetched %d replies for thread", len(events))
+	return events
+}
+
+func fetchRepliesFromRelay(ctx context.Context, relayURL string, eventIDs []string, eventChan chan<- Event) {
+	conn, _, err := websocket.DefaultDialer.DialContext(ctx, relayURL, nil)
+	if err != nil {
+		log.Printf("Failed to connect to %s for replies: %v", relayURL, err)
+		return
+	}
+	defer conn.Close()
+
+	subID := "replies-" + randomString(8)
+	reqFilter := map[string]interface{}{
+		"kinds": []int{1}, // Kind 1 = notes/replies
+		"#e":    eventIDs,
+		"limit": 100,
+	}
+
+	req := []interface{}{"REQ", subID, reqFilter}
+	if err := conn.WriteJSON(req); err != nil {
+		log.Printf("Failed to send REQ to %s: %v", relayURL, err)
+		return
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+			var msg NostrMessage
+			if err := conn.ReadJSON(&msg); err != nil {
+				return
+			}
+
+			if len(msg) < 2 {
+				continue
+			}
+
+			msgType, ok := msg[0].(string)
+			if !ok {
+				continue
+			}
+
+			switch msgType {
+			case "EVENT":
+				if len(msg) >= 3 {
+					eventData, err := json.Marshal(msg[2])
+					if err != nil {
+						continue
+					}
+					var evt Event
+					if err := json.Unmarshal(eventData, &evt); err != nil {
+						continue
+					}
+					evt.RelaysSeen = []string{relayURL}
+
+					select {
+					case eventChan <- evt:
+					case <-ctx.Done():
+						return
+					}
+				}
+			case "EOSE":
+				log.Printf("Received EOSE for replies from %s", relayURL)
+				return
+			}
+		}
+	}
+}
+
 // fetchReplyCounts fetches reply counts for the given event IDs
 func fetchReplyCounts(relays []string, eventIDs []string) map[string]int {
 	if len(eventIDs) == 0 {
@@ -634,67 +751,4 @@ collectLoop:
 	}
 
 	return replyCounts
-}
-
-func fetchRepliesFromRelay(ctx context.Context, relayURL string, eventIDs []string, eventChan chan<- Event) {
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, relayURL, nil)
-	if err != nil {
-		return
-	}
-	defer conn.Close()
-
-	subID := "sub-" + randomString(8)
-	reqFilter := map[string]interface{}{
-		"kinds": []int{1},
-		"#e":    eventIDs,
-		"limit": 500,
-	}
-
-	req := []interface{}{"REQ", subID, reqFilter}
-	if err := conn.WriteJSON(req); err != nil {
-		return
-	}
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-			var msg NostrMessage
-			if err := conn.ReadJSON(&msg); err != nil {
-				return
-			}
-
-			if len(msg) < 2 {
-				continue
-			}
-
-			msgType, ok := msg[0].(string)
-			if !ok {
-				continue
-			}
-
-			switch msgType {
-			case "EVENT":
-				if len(msg) >= 3 {
-					eventData, err := json.Marshal(msg[2])
-					if err != nil {
-						continue
-					}
-					var evt Event
-					if err := json.Unmarshal(eventData, &evt); err != nil {
-						continue
-					}
-
-					select {
-					case eventChan <- evt:
-					case <-ctx.Done():
-						return
-					}
-				}
-			case "EOSE":
-				return
-			}
-		}
-	}
 }

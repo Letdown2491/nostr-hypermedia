@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
+	"fmt"
 	"html/template"
 	"log"
 	"net/http"
@@ -54,6 +56,12 @@ func htmlLoginHandler(w http.ResponseWriter, r *http.Request) {
 		qrCodeDataURL = generateQRCodeDataURL(nostrConnectURL)
 	}
 
+	// Get server pubkey for reconnect section
+	var serverPubKey string
+	if kp, err := GetServerKeypair(); err == nil {
+		serverPubKey = hex.EncodeToString(kp.PubKey)
+	}
+
 	data := struct {
 		Title           string
 		Error           string
@@ -61,11 +69,13 @@ func htmlLoginHandler(w http.ResponseWriter, r *http.Request) {
 		NostrConnectURL string
 		Secret          string
 		QRCodeDataURL   template.URL
+		ServerPubKey    string
 	}{
 		Title:           "Login with Nostr Connect",
 		NostrConnectURL: nostrConnectURL,
 		Secret:          secret,
 		QRCodeDataURL:   template.URL(qrCodeDataURL),
+		ServerPubKey:    serverPubKey,
 	}
 
 	// Check for error/success messages in query params
@@ -155,6 +165,149 @@ func htmlCheckConnectionHandler(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/html/timeline?kinds=1&limit=20&success=Logged+in+successfully", http.StatusSeeOther)
 }
 
+// htmlReconnectHandler tries to reconnect to an existing approved signer
+func htmlReconnectHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Redirect(w, r, "/html/login", http.StatusSeeOther)
+		return
+	}
+
+	signerPubKey := strings.TrimSpace(r.FormValue("signer_pubkey"))
+	if signerPubKey == "" {
+		http.Redirect(w, r, "/html/login?error=Please+enter+your+signer+pubkey", http.StatusSeeOther)
+		return
+	}
+
+	// Handle npub format
+	if strings.HasPrefix(signerPubKey, "npub1") {
+		// Decode bech32 npub to hex
+		decoded, err := decodeBech32Pubkey(signerPubKey)
+		if err != nil {
+			http.Redirect(w, r, "/html/login?error="+escapeURLParam("Invalid npub: "+err.Error()), http.StatusSeeOther)
+			return
+		}
+		signerPubKey = decoded
+	}
+
+	// Validate hex
+	if len(signerPubKey) != 64 {
+		http.Redirect(w, r, "/html/login?error=Invalid+pubkey+length+(expected+64+hex+chars+or+npub)", http.StatusSeeOther)
+		return
+	}
+
+	log.Printf("Attempting to reconnect to signer: %s", signerPubKey[:16])
+
+	session, err := TryReconnectToSigner(signerPubKey, defaultNostrConnectRelays)
+	if err != nil {
+		log.Printf("Reconnect failed: %v", err)
+		http.Redirect(w, r, "/html/login?error="+escapeURLParam("Reconnect failed: "+err.Error()), http.StatusSeeOther)
+		return
+	}
+
+	// Success! Store session and set cookie
+	bunkerSessions.Set(session)
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    session.ID,
+		Path:     "/",
+		MaxAge:   int(sessionMaxAge.Seconds()),
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+
+	log.Printf("User logged in via reconnect: %s", hex.EncodeToString(session.UserPubKey))
+	http.Redirect(w, r, "/html/timeline?kinds=1&limit=20&success=Reconnected+successfully", http.StatusSeeOther)
+}
+
+// decodeBech32Pubkey decodes an npub to hex pubkey
+func decodeBech32Pubkey(npub string) (string, error) {
+	// Simple bech32 decoding - npub uses bech32
+	if !strings.HasPrefix(npub, "npub1") {
+		return "", errors.New("not an npub")
+	}
+
+	// Use standard bech32 decode
+	_, data, err := bech32Decode(npub)
+	if err != nil {
+		return "", err
+	}
+
+	// Convert 5-bit groups to 8-bit bytes
+	decoded, err := bech32ConvertBits(data, 5, 8, false)
+	if err != nil {
+		return "", err
+	}
+
+	if len(decoded) != 32 {
+		return "", errors.New("invalid pubkey length")
+	}
+
+	return hex.EncodeToString(decoded), nil
+}
+
+// bech32 charset
+const bech32Charset = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
+
+func bech32Decode(bech string) (string, []byte, error) {
+	if len(bech) < 8 {
+		return "", nil, errors.New("too short")
+	}
+
+	// Find separator
+	pos := strings.LastIndex(bech, "1")
+	if pos < 1 || pos+7 > len(bech) {
+		return "", nil, errors.New("invalid separator position")
+	}
+
+	hrp := bech[:pos]
+	data := bech[pos+1:]
+
+	// Decode data
+	var values []byte
+	for _, c := range data {
+		idx := strings.IndexRune(bech32Charset, c)
+		if idx == -1 {
+			return "", nil, errors.New("invalid character")
+		}
+		values = append(values, byte(idx))
+	}
+
+	// Remove checksum (last 6 chars)
+	if len(values) < 6 {
+		return "", nil, errors.New("too short for checksum")
+	}
+	values = values[:len(values)-6]
+
+	return hrp, values, nil
+}
+
+func bech32ConvertBits(data []byte, fromBits, toBits int, pad bool) ([]byte, error) {
+	acc := 0
+	bits := 0
+	var ret []byte
+	maxv := (1 << toBits) - 1
+
+	for _, value := range data {
+		acc = (acc << fromBits) | int(value)
+		bits += fromBits
+		for bits >= toBits {
+			bits -= toBits
+			ret = append(ret, byte((acc>>bits)&maxv))
+		}
+	}
+
+	if pad {
+		if bits > 0 {
+			ret = append(ret, byte((acc<<(toBits-bits))&maxv))
+		}
+	} else if bits >= fromBits || ((acc<<(toBits-bits))&maxv) != 0 {
+		return nil, errors.New("invalid padding")
+	}
+
+	return ret, nil
+}
+
 // htmlLogoutHandler logs out the user
 func htmlLogoutHandler(w http.ResponseWriter, r *http.Request) {
 	session := getSessionFromRequest(r)
@@ -228,16 +381,26 @@ func htmlPostNoteHandler(w http.ResponseWriter, r *http.Request) {
 
 // htmlReplyHandler handles replying to a note via POST form
 func htmlReplyHandler(w http.ResponseWriter, r *http.Request) {
+	log.Printf("Reply handler called: method=%s", r.Method)
+
 	if r.Method != http.MethodPost {
 		http.Redirect(w, r, "/html/timeline?kinds=1&limit=20", http.StatusSeeOther)
 		return
 	}
 
 	session := getSessionFromRequest(r)
-	if session == nil || !session.Connected {
+	if session == nil {
+		log.Printf("Reply failed: no session found")
 		http.Redirect(w, r, "/html/login?error=Please+login+first", http.StatusSeeOther)
 		return
 	}
+	if !session.Connected {
+		log.Printf("Reply failed: session not connected")
+		http.Redirect(w, r, "/html/login?error=Please+login+first", http.StatusSeeOther)
+		return
+	}
+
+	log.Printf("Reply: session valid, user=%s", hex.EncodeToString(session.UserPubKey)[:16])
 
 	content := strings.TrimSpace(r.FormValue("content"))
 	replyTo := strings.TrimSpace(r.FormValue("reply_to"))
@@ -331,7 +494,34 @@ func publishToRelay(ctx context.Context, relayURL string, event *Event) error {
 	defer conn.Close()
 
 	req := []interface{}{"EVENT", event}
-	return conn.WriteJSON(req)
+	if err := conn.WriteJSON(req); err != nil {
+		return fmt.Errorf("write failed: %v", err)
+	}
+
+	// Wait for OK response
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	var msg []interface{}
+	if err := conn.ReadJSON(&msg); err != nil {
+		return fmt.Errorf("read OK failed: %v", err)
+	}
+
+	if len(msg) >= 4 {
+		msgType, _ := msg[0].(string)
+		if msgType == "OK" {
+			eventID, _ := msg[1].(string)
+			success, _ := msg[2].(bool)
+			reason := ""
+			if len(msg) > 3 {
+				reason, _ = msg[3].(string)
+			}
+			if !success {
+				return fmt.Errorf("relay rejected event %s: %s", eventID, reason)
+			}
+			log.Printf("Relay %s accepted event %s", relayURL, eventID[:16])
+		}
+	}
+
+	return nil
 }
 
 var htmlLoginTemplate = `<!DOCTYPE html>
@@ -556,6 +746,29 @@ var htmlLoginTemplate = `<!DOCTYPE html>
           </p>
         </div>
         <button type="submit" class="submit-btn">Connect</button>
+      </form>
+
+      <div style="text-align: center; color: #999; margin: 20px 0; font-size: 14px;">
+        &mdash; or &mdash;
+      </div>
+
+      <form class="login-form" method="POST" action="/html/reconnect">
+        <h3 style="margin-bottom: 16px; color: #333;">Option 3: Reconnect to Existing Bunker</h3>
+        <p style="font-size: 13px; color: #666; margin-bottom: 16px; background: #e9ecef; padding: 12px; border-radius: 4px;">
+          <strong>This server's pubkey:</strong><br>
+          <code style="font-size: 11px; word-break: break-all;">{{.ServerPubKey}}</code><br>
+          <span style="font-size: 11px;">Look for this in your signer's approved connections list.</span>
+        </p>
+        <div class="form-group">
+          <label for="signer_pubkey">Signer Public Key</label>
+          <input type="text" id="signer_pubkey" name="signer_pubkey"
+                 placeholder="npub1... or hex pubkey"
+                 required autocomplete="off">
+          <p class="form-help">
+            Enter the pubkey your signer uses for NIP-46 (found in Amber under the approved connection details).
+          </p>
+        </div>
+        <button type="submit" class="submit-btn">Reconnect</button>
       </form>
 
       <div class="info-section">

@@ -353,6 +353,7 @@ var htmlTemplate = `<!DOCTYPE html>
           {{if .RelaysSeen}}
           <span title="{{join .RelaysSeen ", "}}">from {{len .RelaysSeen}} relay(s)</span>
           {{end}}
+          <a href="/html/thread/{{.ID}}" style="color:#667eea;text-decoration:none;margin-left:auto;">Reply →</a>
         </div>
         {{if .Links}}
         <div class="links">

@@ -197,19 +197,11 @@ func htmlThreadHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	// Fetch replies (events that reference this event via #e tag)
+	// Fetch replies (kind 1 events that reference this event via #e tag)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		replies, _ = fetchEventsFromRelaysWithETags(relays, []string{eventID})
-		// Filter to only kind 1 (notes) that are actual replies
-		filtered := make([]Event, 0)
-		for _, evt := range replies {
-			if evt.Kind == 1 {
-				filtered = append(filtered, evt)
-			}
-		}
-		replies = filtered
+		replies = fetchReplies(relays, []string{eventID})
 	}()
 
 	wg.Wait()

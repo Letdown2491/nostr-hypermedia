@@ -35,6 +35,7 @@ func main() {
 	http.HandleFunc("/html/post", htmlPostNoteHandler)
 	http.HandleFunc("/html/reply", htmlReplyHandler)
 	http.HandleFunc("/html/check-connection", htmlCheckConnectionHandler)
+	http.HandleFunc("/html/reconnect", htmlReconnectHandler)
 	http.HandleFunc("/health", healthHandler)
 
 	// Start NIP-46 connection listener for nostrconnect:// flow

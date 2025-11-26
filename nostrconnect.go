@@ -451,3 +451,78 @@ var defaultNostrConnectRelays = []string{
 	"wss://relay.nsec.app",
 	"wss://relay.damus.io",
 }
+
+// TryReconnectToSigner attempts to reconnect to an existing approved signer
+// This works when the signer has already approved our server pubkey
+func TryReconnectToSigner(signerPubKeyHex string, relays []string) (*BunkerSession, error) {
+	kp, err := GetServerKeypair()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get server keypair: %v", err)
+	}
+
+	signerPubKey, err := hex.DecodeString(signerPubKeyHex)
+	if err != nil {
+		return nil, fmt.Errorf("invalid signer pubkey: %v", err)
+	}
+
+	// Compute conversation key
+	convKey, err := GetConversationKey(kp.PrivKey, signerPubKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to compute conversation key: %v", err)
+	}
+
+	// Try to get_public_key from the signer
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	reqIDBytes := make([]byte, 8)
+	rand.Read(reqIDBytes)
+	reqID := hex.EncodeToString(reqIDBytes)
+
+	request := NIP46Request{
+		ID:     reqID,
+		Method: "get_public_key",
+		Params: []string{},
+	}
+
+	requestJSON, _ := json.Marshal(request)
+	encryptedContent, err := Nip44Encrypt(string(requestJSON), convKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encrypt request: %v", err)
+	}
+
+	requestEvent := createNIP46Event(kp.PrivKey, kp.PubKey, signerPubKey, encryptedContent)
+
+	// Try each relay
+	for _, relay := range relays {
+		userPubKey, err := sendAndWaitForResponse(ctx, relay, requestEvent, reqID, convKey, signerPubKeyHex)
+		if err != nil {
+			log.Printf("NIP-46: reconnect get_public_key failed on %s: %v", relay, err)
+			continue
+		}
+
+		userPubKeyBytes, err := hex.DecodeString(userPubKey)
+		if err != nil {
+			log.Printf("NIP-46: Invalid user pubkey from reconnect: %v", err)
+			continue
+		}
+
+		// Success! Create session
+		session := &BunkerSession{
+			ID:                 generateSessionID(),
+			ClientPrivKey:      kp.PrivKey,
+			ClientPubKey:       kp.PubKey,
+			RemoteSignerPubKey: signerPubKey,
+			UserPubKey:         userPubKeyBytes,
+			Relays:             relays,
+			ConversationKey:    convKey,
+			Connected:          true,
+			CreatedAt:          time.Now(),
+		}
+
+		log.Printf("NIP-46: Reconnected to signer %s, user pubkey: %s", signerPubKeyHex[:16], userPubKey)
+		return session, nil
+	}
+
+	return nil, errors.New("failed to reconnect: signer did not respond on any relay")
+}

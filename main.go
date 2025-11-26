@@ -30,6 +30,7 @@ func main() {
 	})
 	http.HandleFunc("/html/timeline", htmlTimelineHandler)
 	http.HandleFunc("/html/thread/", htmlThreadHandler)
+	http.HandleFunc("/html/profile/", htmlProfileHandler)
 	http.HandleFunc("/html/login", htmlLoginHandler)
 	http.HandleFunc("/html/logout", htmlLogoutHandler)
 	http.HandleFunc("/html/post", htmlPostNoteHandler)

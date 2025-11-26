@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"sort"
@@ -307,5 +308,137 @@ func htmlThreadHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "max-age=10")
+	w.Write([]byte(htmlContent))
+}
+
+func htmlProfileHandler(w http.ResponseWriter, r *http.Request) {
+	// Extract pubkey from path: /html/profile/{pubkey}
+	pubkey := strings.TrimPrefix(r.URL.Path, "/html/profile/")
+	if pubkey == "" {
+		http.Error(w, "Pubkey required", http.StatusBadRequest)
+		return
+	}
+
+	// Handle npub format - decode to hex if needed
+	if strings.HasPrefix(pubkey, "npub1") {
+		hexPubkey, err := decodeBech32Pubkey(pubkey)
+		if err != nil {
+			http.Error(w, "Invalid npub format", http.StatusBadRequest)
+			return
+		}
+		pubkey = hexPubkey
+	}
+
+	q := r.URL.Query()
+	relays := parseStringList(q.Get("relays"))
+	if len(relays) == 0 {
+		relays = []string{
+			"wss://relay.damus.io",
+			"wss://relay.nostr.band",
+			"wss://relay.primal.net",
+			"wss://nos.lol",
+			"wss://nostr.mom",
+		}
+	}
+
+	limit := parseLimit(q.Get("limit"), 20)
+	until := parseInt64(q.Get("until"))
+
+	log.Printf("HTML: Fetching profile for pubkey: %s", pubkey[:16])
+
+	// Fetch profile and notes in parallel
+	var profile *ProfileInfo
+	var events []Event
+	var wg sync.WaitGroup
+
+	// Fetch profile (kind 0)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		profiles := fetchProfiles(relays, []string{pubkey})
+		profile = profiles[pubkey]
+	}()
+
+	// Fetch user's top-level notes (kind 1, filtered to exclude replies)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		filter := Filter{
+			Authors: []string{pubkey},
+			Kinds:   []int{1},
+			Limit:   limit * 2, // Fetch more since we'll filter out replies
+			Until:   until,
+		}
+		events, _ = fetchEventsFromRelays(relays, filter)
+	}()
+
+	wg.Wait()
+
+	// Filter out replies (notes with e tags)
+	topLevelNotes := make([]Event, 0, len(events))
+	for _, evt := range events {
+		if !isReply(evt) {
+			topLevelNotes = append(topLevelNotes, evt)
+		}
+	}
+
+	// Apply limit after filtering
+	if len(topLevelNotes) > limit {
+		topLevelNotes = topLevelNotes[:limit]
+	}
+
+	// Build response items with enrichment
+	items := make([]EventItem, len(topLevelNotes))
+	for i, evt := range topLevelNotes {
+		items[i] = EventItem{
+			ID:            evt.ID,
+			Kind:          evt.Kind,
+			Pubkey:        evt.PubKey,
+			CreatedAt:     evt.CreatedAt,
+			Content:       evt.Content,
+			Tags:          evt.Tags,
+			Sig:           evt.Sig,
+			RelaysSeen:    evt.RelaysSeen,
+			AuthorProfile: profile, // Use the fetched profile for all notes
+		}
+	}
+
+	// Build pagination
+	var pageUntil *int64
+	var nextURL *string
+	if len(items) > 0 {
+		lastCreatedAt := items[len(items)-1].CreatedAt
+		pageUntil = &lastCreatedAt
+		next := fmt.Sprintf("/html/profile/%s?limit=%d&until=%d", pubkey, limit, lastCreatedAt)
+		nextURL = &next
+	}
+
+	resp := ProfileResponse{
+		Pubkey:  pubkey,
+		Profile: profile,
+		Notes: TimelineResponse{
+			Items: items,
+			Page: PageInfo{
+				Until: pageUntil,
+				Next:  nextURL,
+			},
+			Meta: MetaInfo{
+				QueriedRelays: len(relays),
+				EOSE:          true,
+				GeneratedAt:   time.Now(),
+			},
+		},
+	}
+
+	// Render HTML
+	htmlContent, err := renderProfileHTML(resp, relays, limit)
+	if err != nil {
+		log.Printf("Error rendering profile HTML: %v", err)
+		http.Error(w, "Error rendering page", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "max-age=30")
 	w.Write([]byte(htmlContent))
 }

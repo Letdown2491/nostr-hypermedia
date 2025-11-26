@@ -308,6 +308,87 @@ func bech32ConvertBits(data []byte, fromBits, toBits int, pad bool) ([]byte, err
 	return ret, nil
 }
 
+// encodeBech32Pubkey encodes a hex pubkey to npub format
+func encodeBech32Pubkey(hexPubkey string) (string, error) {
+	pubkeyBytes, err := hex.DecodeString(hexPubkey)
+	if err != nil {
+		return "", err
+	}
+	if len(pubkeyBytes) != 32 {
+		return "", errors.New("invalid pubkey length")
+	}
+
+	// Convert 8-bit bytes to 5-bit groups
+	data, err := bech32ConvertBits(pubkeyBytes, 8, 5, true)
+	if err != nil {
+		return "", err
+	}
+
+	return bech32Encode("npub", data)
+}
+
+// bech32Encode encodes data with the given HRP
+func bech32Encode(hrp string, data []byte) (string, error) {
+	// Create checksum
+	values := append([]byte{}, data...)
+	checksum := bech32CreateChecksum(hrp, values)
+	combined := append(values, checksum...)
+
+	// Build result
+	var result strings.Builder
+	result.WriteString(hrp)
+	result.WriteByte('1')
+	for _, v := range combined {
+		result.WriteByte(bech32Charset[v])
+	}
+
+	return result.String(), nil
+}
+
+// bech32 polymod for checksum calculation
+func bech32Polymod(values []int) int {
+	gen := []int{0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3}
+	chk := 1
+	for _, v := range values {
+		top := chk >> 25
+		chk = (chk&0x1ffffff)<<5 ^ v
+		for i := 0; i < 5; i++ {
+			if (top>>i)&1 != 0 {
+				chk ^= gen[i]
+			}
+		}
+	}
+	return chk
+}
+
+func bech32HrpExpand(hrp string) []int {
+	var ret []int
+	for _, c := range hrp {
+		ret = append(ret, int(c>>5))
+	}
+	ret = append(ret, 0)
+	for _, c := range hrp {
+		ret = append(ret, int(c&31))
+	}
+	return ret
+}
+
+func bech32CreateChecksum(hrp string, data []byte) []byte {
+	values := bech32HrpExpand(hrp)
+	for _, d := range data {
+		values = append(values, int(d))
+	}
+	for i := 0; i < 6; i++ {
+		values = append(values, 0)
+	}
+	polymod := bech32Polymod(values) ^ 1
+	var checksum []byte
+	for i := 0; i < 6; i++ {
+		checksum = append(checksum, byte((polymod>>(5*(5-i)))&31))
+	}
+	return checksum
+}
+
 // htmlLogoutHandler logs out the user
 func htmlLogoutHandler(w http.ResponseWriter, r *http.Request) {
 	session := getSessionFromRequest(r)

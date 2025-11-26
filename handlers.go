@@ -38,6 +38,7 @@ type ProfileInfo struct {
 	DisplayName string `json:"display_name,omitempty"`
 	Picture     string `json:"picture,omitempty"`
 	Nip05       string `json:"nip05,omitempty"`
+	About       string `json:"about,omitempty"`
 }
 
 type ReactionsSummary struct {
@@ -60,6 +61,12 @@ type ThreadResponse struct {
 	Root    EventItem   `json:"root"`
 	Replies []EventItem `json:"replies"`
 	Meta    MetaInfo    `json:"meta"`
+}
+
+type ProfileResponse struct {
+	Pubkey  string           `json:"pubkey"`
+	Profile *ProfileInfo     `json:"profile"`
+	Notes   TimelineResponse `json:"notes"`
 }
 
 func timelineHandler(w http.ResponseWriter, r *http.Request) {

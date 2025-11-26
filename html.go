@@ -320,10 +320,13 @@ var htmlTemplate = `<!DOCTYPE html>
       {{range .Items}}
       <article class="note">
         <div class="note-author">
+          <a href="/html/profile/{{.Pubkey}}" style="text-decoration:none;">
           {{if and .AuthorProfile .AuthorProfile.Picture}}
           <img class="author-avatar" src="{{.AuthorProfile.Picture}}" alt="avatar" onerror="this.style.display='none'">
           {{end}}
+          </a>
           <div class="author-info">
+            <a href="/html/profile/{{.Pubkey}}" style="text-decoration:none;">
             {{if .AuthorProfile}}
             {{if or .AuthorProfile.DisplayName .AuthorProfile.Name}}
             <span class="author-name">{{if .AuthorProfile.DisplayName}}{{.AuthorProfile.DisplayName}}{{else}}{{.AuthorProfile.Name}}{{end}}</span>
@@ -332,7 +335,8 @@ var htmlTemplate = `<!DOCTYPE html>
             <span class="author-nip05">{{.AuthorProfile.Nip05}}</span>
             {{end}}
             {{end}}
-            <span class="pubkey" title="{{.Pubkey}}">{{slice .Pubkey 0 12}}...</span>
+            <span class="pubkey" title="{{.Pubkey}}">{{.NpubShort}}</span>
+            </a>
           </div>
         </div>
         <div class="note-content">{{.ContentHTML}}</div>
@@ -423,6 +427,8 @@ type HTMLEventItem struct {
 	ID            string
 	Kind          int
 	Pubkey        string
+	Npub          string // Bech32-encoded npub format
+	NpubShort     string // Short display format (npub1abc...xyz)
 	CreatedAt     int64
 	Content       string
 	ContentHTML   template.HTML
@@ -455,6 +461,14 @@ type HTMLField struct {
 var imageExtRegex = regexp.MustCompile(`(?i)\.(jpg|jpeg|png|gif|webp)(\?.*)?$`)
 var urlRegex = regexp.MustCompile(`https?://[^\s<>"]+`)
 
+// formatNpubShort creates a shortened npub display like "npub1abc...xyz"
+func formatNpubShort(npub string) string {
+	if len(npub) <= 16 {
+		return npub
+	}
+	return npub[:9] + "..." + npub[len(npub)-4:]
+}
+
 // processContentToHTML converts plain text content to HTML with images and links
 func processContentToHTML(content string) template.HTML {
 	// First escape the content
@@ -477,10 +491,15 @@ func renderHTML(resp TimelineResponse, relays []string, authors []string, kinds 
 	// Convert to HTML page data
 	items := make([]HTMLEventItem, len(resp.Items))
 	for i, item := range resp.Items {
+		// Generate npub from hex pubkey
+		npub, _ := encodeBech32Pubkey(item.Pubkey)
+
 		items[i] = HTMLEventItem{
 			ID:            item.ID,
 			Kind:          item.Kind,
 			Pubkey:        item.Pubkey,
+			Npub:          npub,
+			NpubShort:     formatNpubShort(npub),
 			CreatedAt:     item.CreatedAt,
 			Content:       item.Content,
 			ContentHTML:   processContentToHTML(item.Content),
@@ -492,7 +511,7 @@ func renderHTML(resp TimelineResponse, relays []string, authors []string, kinds 
 		}
 
 		// Add profile link
-		items[i].Links = append(items[i].Links, fmt.Sprintf("/html/profiles/%s", item.Pubkey))
+		items[i].Links = append(items[i].Links, fmt.Sprintf("/html/profile/%s", item.Pubkey))
 
 		// Add thread link if reply
 		for _, tag := range item.Tags {
@@ -772,10 +791,13 @@ var htmlThreadTemplate = `<!DOCTYPE html>
       {{if .Root}}
       <article class="note root">
         <div class="note-author">
+          <a href="/html/profile/{{.Root.Pubkey}}" style="text-decoration:none;">
           {{if and .Root.AuthorProfile .Root.AuthorProfile.Picture}}
           <img class="author-avatar" src="{{.Root.AuthorProfile.Picture}}" alt="avatar" onerror="this.style.display='none'">
           {{end}}
+          </a>
           <div class="author-info">
+            <a href="/html/profile/{{.Root.Pubkey}}" style="text-decoration:none;">
             {{if .Root.AuthorProfile}}
             {{if or .Root.AuthorProfile.DisplayName .Root.AuthorProfile.Name}}
             <span class="author-name">{{if .Root.AuthorProfile.DisplayName}}{{.Root.AuthorProfile.DisplayName}}{{else}}{{.Root.AuthorProfile.Name}}{{end}}</span>
@@ -784,7 +806,8 @@ var htmlThreadTemplate = `<!DOCTYPE html>
             <span class="author-nip05">{{.Root.AuthorProfile.Nip05}}</span>
             {{end}}
             {{end}}
-            <span class="pubkey" title="{{.Root.Pubkey}}">{{slice .Root.Pubkey 0 12}}...</span>
+            <span class="pubkey" title="{{.Root.Pubkey}}">{{.Root.NpubShort}}</span>
+            </a>
           </div>
         </div>
         <div class="note-content">{{.Root.ContentHTML}}</div>
@@ -826,10 +849,13 @@ var htmlThreadTemplate = `<!DOCTYPE html>
         {{range .Replies}}
         <article class="note reply">
           <div class="note-author">
+            <a href="/html/profile/{{.Pubkey}}" style="text-decoration:none;">
             {{if and .AuthorProfile .AuthorProfile.Picture}}
             <img class="author-avatar" src="{{.AuthorProfile.Picture}}" alt="avatar" onerror="this.style.display='none'">
             {{end}}
+            </a>
             <div class="author-info">
+              <a href="/html/profile/{{.Pubkey}}" style="text-decoration:none;">
               {{if .AuthorProfile}}
               {{if or .AuthorProfile.DisplayName .AuthorProfile.Name}}
               <span class="author-name">{{if .AuthorProfile.DisplayName}}{{.AuthorProfile.DisplayName}}{{else}}{{.AuthorProfile.Name}}{{end}}</span>
@@ -838,7 +864,8 @@ var htmlThreadTemplate = `<!DOCTYPE html>
               <span class="author-nip05">{{.AuthorProfile.Nip05}}</span>
               {{end}}
               {{end}}
-              <span class="pubkey" title="{{.Pubkey}}">{{slice .Pubkey 0 12}}...</span>
+              <span class="pubkey" title="{{.Pubkey}}">{{.NpubShort}}</span>
+              </a>
             </div>
           </div>
           <div class="note-content">{{.ContentHTML}}</div>
@@ -896,11 +923,16 @@ func extractParentID(tags [][]string) string {
 }
 
 func renderThreadHTML(resp ThreadResponse, session *BunkerSession) (string, error) {
+	// Generate npub for root author
+	rootNpub, _ := encodeBech32Pubkey(resp.Root.Pubkey)
+
 	// Convert root to HTML item
 	root := &HTMLEventItem{
 		ID:            resp.Root.ID,
 		Kind:          resp.Root.Kind,
 		Pubkey:        resp.Root.Pubkey,
+		Npub:          rootNpub,
+		NpubShort:     formatNpubShort(rootNpub),
 		CreatedAt:     resp.Root.CreatedAt,
 		Content:       resp.Root.Content,
 		ContentHTML:   processContentToHTML(resp.Root.Content),
@@ -913,10 +945,13 @@ func renderThreadHTML(resp ThreadResponse, session *BunkerSession) (string, erro
 	// Convert replies to HTML items
 	replies := make([]HTMLEventItem, len(resp.Replies))
 	for i, item := range resp.Replies {
+		npub, _ := encodeBech32Pubkey(item.Pubkey)
 		replies[i] = HTMLEventItem{
 			ID:            item.ID,
 			Kind:          item.Kind,
 			Pubkey:        item.Pubkey,
+			Npub:          npub,
+			NpubShort:     formatNpubShort(npub),
 			CreatedAt:     item.CreatedAt,
 			Content:       item.Content,
 			ContentHTML:   processContentToHTML(item.Content),
@@ -957,6 +992,340 @@ func renderThreadHTML(resp ThreadResponse, session *BunkerSession) (string, erro
 	}
 
 	tmpl, err := template.New("thread").Funcs(funcMap).Parse(htmlThreadTemplate)
+	if err != nil {
+		return "", err
+	}
+
+	var buf strings.Builder
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return "", err
+	}
+
+	return buf.String(), nil
+}
+
+var htmlProfileTemplate = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{.Title}} - Nostr Hypermedia</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      line-height: 1.6;
+      color: #333;
+      background: #f5f5f5;
+      padding: 20px;
+    }
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      overflow: hidden;
+    }
+    header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 30px;
+      text-align: center;
+    }
+    header h1 { font-size: 28px; margin-bottom: 8px; }
+    .subtitle { opacity: 0.9; font-size: 14px; }
+    nav {
+      padding: 15px;
+      background: #f8f9fa;
+      border-bottom: 1px solid #dee2e6;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    nav a {
+      padding: 8px 16px;
+      background: #667eea;
+      color: white;
+      text-decoration: none;
+      border-radius: 4px;
+      font-size: 14px;
+      transition: background 0.2s;
+    }
+    nav a:hover { background: #5568d3; }
+    main { padding: 20px; min-height: 400px; }
+    .profile-header {
+      display: flex;
+      align-items: flex-start;
+      gap: 20px;
+      padding: 24px;
+      background: #f8f9fa;
+      border-radius: 8px;
+      margin-bottom: 24px;
+    }
+    .profile-avatar {
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      object-fit: cover;
+      border: 3px solid #667eea;
+      flex-shrink: 0;
+    }
+    .profile-info {
+      flex: 1;
+    }
+    .profile-name {
+      font-size: 24px;
+      font-weight: 700;
+      color: #24292e;
+      margin-bottom: 4px;
+    }
+    .profile-nip05 {
+      font-size: 14px;
+      color: #667eea;
+      margin-bottom: 8px;
+    }
+    .profile-npub {
+      font-family: monospace;
+      font-size: 12px;
+      color: #666;
+      background: #e9ecef;
+      padding: 4px 8px;
+      border-radius: 4px;
+      display: inline-block;
+      margin-bottom: 8px;
+    }
+    .profile-about {
+      font-size: 14px;
+      color: #555;
+      line-height: 1.5;
+    }
+    .notes-section h3 {
+      color: #555;
+      font-size: 18px;
+      margin-bottom: 16px;
+      padding-bottom: 8px;
+      border-bottom: 2px solid #e1e4e8;
+    }
+    .note {
+      background: white;
+      border: 1px solid #e1e4e8;
+      border-radius: 6px;
+      padding: 16px;
+      margin: 12px 0;
+      transition: box-shadow 0.2s;
+    }
+    .note:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+    .note-content {
+      font-size: 15px;
+      line-height: 1.6;
+      margin: 12px 0;
+      color: #24292e;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+    .note-content img {
+      max-width: 100%;
+      border-radius: 8px;
+      margin: 8px 0;
+      display: block;
+    }
+    .note-content a {
+      color: #667eea;
+      text-decoration: none;
+    }
+    .note-content a:hover {
+      text-decoration: underline;
+    }
+    .note-meta {
+      display: flex;
+      gap: 16px;
+      font-size: 12px;
+      color: #666;
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid #e1e4e8;
+      flex-wrap: wrap;
+    }
+    .pagination {
+      display: flex;
+      justify-content: center;
+      gap: 12px;
+      margin: 24px 0;
+      padding: 20px 0;
+      border-top: 1px solid #e1e4e8;
+    }
+    .link {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 6px 12px;
+      background: white;
+      border: 1px solid #667eea;
+      color: #667eea;
+      text-decoration: none;
+      border-radius: 4px;
+      font-size: 13px;
+      transition: all 0.2s;
+    }
+    .link:hover {
+      background: #667eea;
+      color: white;
+    }
+    footer {
+      text-align: center;
+      padding: 20px;
+      background: #f8f9fa;
+      color: #666;
+      font-size: 13px;
+      border-top: 1px solid #dee2e6;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>{{.Title}}</h1>
+      <p class="subtitle">Zero-JS Hypermedia Browser</p>
+    </header>
+
+    <nav>
+      <a href="/html/timeline?kinds=1&limit=20&fast=1">← Timeline</a>
+      <a href="/">JS Client</a>
+    </nav>
+
+    <main>
+      <div class="profile-header">
+        {{if and .Profile .Profile.Picture}}
+        <img class="profile-avatar" src="{{.Profile.Picture}}" alt="avatar" onerror="this.style.display='none'">
+        {{else}}
+        <div class="profile-avatar" style="background:#667eea;display:flex;align-items:center;justify-content:center;color:white;font-size:32px;">?</div>
+        {{end}}
+        <div class="profile-info">
+          {{if .Profile}}
+          {{if or .Profile.DisplayName .Profile.Name}}
+          <div class="profile-name">{{if .Profile.DisplayName}}{{.Profile.DisplayName}}{{else}}{{.Profile.Name}}{{end}}</div>
+          {{end}}
+          {{if .Profile.Nip05}}
+          <div class="profile-nip05">{{.Profile.Nip05}}</div>
+          {{end}}
+          {{end}}
+          <div class="profile-npub" title="{{.Pubkey}}">{{.NpubShort}}</div>
+          {{if and .Profile .Profile.About}}
+          <div class="profile-about">{{.Profile.About}}</div>
+          {{end}}
+        </div>
+      </div>
+
+      <div class="notes-section">
+        <h3>Notes ({{len .Items}})</h3>
+        {{range .Items}}
+        <article class="note">
+          <div class="note-content">{{.ContentHTML}}</div>
+          <div class="note-meta">
+            <span>{{formatTime .CreatedAt}}</span>
+            {{if .RelaysSeen}}
+            <span title="{{join .RelaysSeen ", "}}">from {{len .RelaysSeen}} relay(s)</span>
+            {{end}}
+            <a href="/html/thread/{{.ID}}" style="color:#667eea;text-decoration:none;margin-left:auto;">View Thread →</a>
+          </div>
+        </article>
+        {{end}}
+      </div>
+
+      {{if .Pagination}}
+      <div class="pagination">
+        {{if .Pagination.Next}}
+        <a href="{{.Pagination.Next}}" class="link">Load More →</a>
+        {{end}}
+      </div>
+      {{end}}
+    </main>
+
+    <footer>
+      <p>Pure HTML hypermedia - no JavaScript required</p>
+    </footer>
+  </div>
+</body>
+</html>
+`
+
+type HTMLProfileData struct {
+	Title      string
+	Pubkey     string
+	Npub       string
+	NpubShort  string
+	Profile    *ProfileInfo
+	Items      []HTMLEventItem
+	Pagination *HTMLPagination
+	Meta       *MetaInfo
+}
+
+func renderProfileHTML(resp ProfileResponse, relays []string, limit int) (string, error) {
+	// Generate npub from hex pubkey
+	npub, _ := encodeBech32Pubkey(resp.Pubkey)
+
+	// Convert notes to HTML items
+	items := make([]HTMLEventItem, len(resp.Notes.Items))
+	for i, item := range resp.Notes.Items {
+		items[i] = HTMLEventItem{
+			ID:            item.ID,
+			Kind:          item.Kind,
+			Pubkey:        item.Pubkey,
+			CreatedAt:     item.CreatedAt,
+			Content:       item.Content,
+			ContentHTML:   processContentToHTML(item.Content),
+			RelaysSeen:    item.RelaysSeen,
+			AuthorProfile: item.AuthorProfile,
+		}
+	}
+
+	// Build pagination
+	var pagination *HTMLPagination
+	if resp.Notes.Page.Next != nil {
+		pagination = &HTMLPagination{
+			Next: *resp.Notes.Page.Next,
+		}
+	}
+
+	// Get display name for title
+	title := "Profile"
+	if resp.Profile != nil {
+		if resp.Profile.DisplayName != "" {
+			title = resp.Profile.DisplayName
+		} else if resp.Profile.Name != "" {
+			title = resp.Profile.Name
+		}
+	}
+
+	data := HTMLProfileData{
+		Title:      title,
+		Pubkey:     resp.Pubkey,
+		Npub:       npub,
+		NpubShort:  formatNpubShort(npub),
+		Profile:    resp.Profile,
+		Items:      items,
+		Pagination: pagination,
+		Meta:       &resp.Notes.Meta,
+	}
+
+	// Template functions
+	funcMap := template.FuncMap{
+		"formatTime": func(ts int64) string {
+			return time.Unix(ts, 0).Format("2006-01-02 15:04:05")
+		},
+		"slice": func(s string, start, end int) string {
+			if end > len(s) {
+				end = len(s)
+			}
+			return s[start:end]
+		},
+		"join": func(arr []string, sep string) string {
+			return strings.Join(arr, sep)
+		},
+	}
+
+	tmpl, err := template.New("profile").Funcs(funcMap).Parse(htmlProfileTemplate)
 	if err != nil {
 		return "", err
 	}

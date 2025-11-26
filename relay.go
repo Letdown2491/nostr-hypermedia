@@ -363,6 +363,9 @@ func fetchProfiles(relays []string, pubkeys []string) map[string]*ProfileInfo {
 		if nip05, ok := profileData["nip05"].(string); ok {
 			profile.Nip05 = nip05
 		}
+		if about, ok := profileData["about"].(string); ok {
+			profile.About = about
+		}
 
 		freshProfiles[evt.PubKey] = profile
 	}

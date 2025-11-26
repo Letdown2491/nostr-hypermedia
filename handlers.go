@@ -30,6 +30,7 @@ type EventItem struct {
 	RelaysSeen    []string          `json:"relays_seen"`
 	AuthorProfile *ProfileInfo      `json:"author_profile,omitempty"`
 	Reactions     *ReactionsSummary `json:"reactions,omitempty"`
+	ReplyCount    int               `json:"reply_count"`
 }
 
 type ProfileInfo struct {
@@ -132,8 +133,9 @@ func timelineHandler(w http.ResponseWriter, r *http.Request) {
 
 	profiles := make(map[string]*ProfileInfo)
 	reactions := make(map[string]*ReactionsSummary)
+	replyCounts := make(map[string]int)
 
-	// Always fetch profiles (they're quick), only fetch reactions in full mode
+	// Always fetch profiles (they're quick), only fetch reactions/replies in full mode
 	var wg sync.WaitGroup
 
 	if len(pubkeySet) > 0 {
@@ -150,7 +152,7 @@ func timelineHandler(w http.ResponseWriter, r *http.Request) {
 		}()
 	}
 
-	// Only fetch reactions in full mode (not fast)
+	// Only fetch reactions and reply counts in full mode (not fast)
 	if !fast && len(eventIDs) > 0 {
 		wg.Add(1)
 		go func() {
@@ -158,6 +160,14 @@ func timelineHandler(w http.ResponseWriter, r *http.Request) {
 			log.Printf("Fetching reactions for %d events", len(eventIDs))
 			reactions = fetchReactions(relays, eventIDs)
 			log.Printf("Fetched reactions for %d events", len(reactions))
+		}()
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			log.Printf("Fetching reply counts for %d events", len(eventIDs))
+			replyCounts = fetchReplyCounts(relays, eventIDs)
+			log.Printf("Fetched reply counts: %d events have replies", len(replyCounts))
 		}()
 	}
 
@@ -177,6 +187,7 @@ func timelineHandler(w http.ResponseWriter, r *http.Request) {
 			RelaysSeen:    evt.RelaysSeen,
 			AuthorProfile: profiles[evt.PubKey],
 			Reactions:     reactions[evt.ID],
+			ReplyCount:    replyCounts[evt.ID],
 		}
 	}
 

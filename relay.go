@@ -554,3 +554,124 @@ func fetchReactionsFromRelay(ctx context.Context, relayURL string, eventIDs []st
 		}
 	}
 }
+
+// fetchReplyCounts fetches reply counts for the given event IDs
+func fetchReplyCounts(relays []string, eventIDs []string) map[string]int {
+	if len(eventIDs) == 0 {
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	var wg sync.WaitGroup
+	eventChan := make(chan Event, 1000)
+
+	for _, relay := range relays {
+		wg.Add(1)
+		go func(relayURL string) {
+			defer wg.Done()
+			fetchRepliesFromRelay(ctx, relayURL, eventIDs, eventChan)
+		}(relay)
+	}
+
+	go func() {
+		wg.Wait()
+		close(eventChan)
+	}()
+
+	seenIDs := make(map[string]bool)
+	replyCounts := make(map[string]int)
+
+collectLoop:
+	for {
+		select {
+		case evt, ok := <-eventChan:
+			if !ok {
+				break collectLoop
+			}
+			if seenIDs[evt.ID] {
+				continue
+			}
+			seenIDs[evt.ID] = true
+
+			// Find the event being replied to (last "e" tag)
+			var targetEventID string
+			for _, tag := range evt.Tags {
+				if len(tag) >= 2 && tag[0] == "e" {
+					targetEventID = tag[1]
+				}
+			}
+			if targetEventID != "" {
+				replyCounts[targetEventID]++
+			}
+		case <-ctx.Done():
+			break collectLoop
+		}
+	}
+
+	return replyCounts
+}
+
+func fetchRepliesFromRelay(ctx context.Context, relayURL string, eventIDs []string, eventChan chan<- Event) {
+	conn, _, err := websocket.DefaultDialer.DialContext(ctx, relayURL, nil)
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+
+	subID := "sub-" + randomString(8)
+	reqFilter := map[string]interface{}{
+		"kinds": []int{1},
+		"#e":    eventIDs,
+		"limit": 500,
+	}
+
+	req := []interface{}{"REQ", subID, reqFilter}
+	if err := conn.WriteJSON(req); err != nil {
+		return
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			var msg NostrMessage
+			if err := conn.ReadJSON(&msg); err != nil {
+				return
+			}
+
+			if len(msg) < 2 {
+				continue
+			}
+
+			msgType, ok := msg[0].(string)
+			if !ok {
+				continue
+			}
+
+			switch msgType {
+			case "EVENT":
+				if len(msg) >= 3 {
+					eventData, err := json.Marshal(msg[2])
+					if err != nil {
+						continue
+					}
+					var evt Event
+					if err := json.Unmarshal(eventData, &evt); err != nil {
+						continue
+					}
+
+					select {
+					case eventChan <- evt:
+					case <-ctx.Done():
+						return
+					}
+				}
+			case "EOSE":
+				return
+			}
+		}
+	}
+}

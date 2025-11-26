@@ -604,14 +604,14 @@ function renderNote(props) {
     metaDiv.appendChild(relaySpan);
   }
 
-  // View Thread button - only show if this note is a reply (part of a thread)
-  if (props.id && replyInfo.isReply) {
+  // View Thread button - only show if note has replies
+  if (props.id && props.reply_count > 0) {
     const threadBtn = document.createElement('button');
     threadBtn.className = 'view-thread-btn';
-    threadBtn.textContent = 'View Thread';
+    threadBtn.textContent = `View Thread (${props.reply_count})`;
     threadBtn.onclick = (e) => {
       e.stopPropagation();
-      navigate(`/thread/${replyInfo.root || props.id}`);
+      navigate(`/thread/${props.id}`);
     };
     metaDiv.appendChild(threadBtn);
   }

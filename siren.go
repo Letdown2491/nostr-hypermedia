@@ -59,49 +59,41 @@ func toSirenTimeline(resp TimelineResponse, relays []string, authors []string, k
 
 	// Add event entities
 	for _, item := range resp.Items {
-		subEntity := SirenSubEntity{
-			Class: []string{"event", "note"},
-			Rel:   []string{"item"},
-			Properties: map[string]interface{}{
-				"id":          item.ID,
-				"kind":        item.Kind,
-				"pubkey":      item.Pubkey,
-				"created_at":  item.CreatedAt,
-				"content":     item.Content,
-				"tags":        item.Tags,
-				"sig":         item.Sig,
-				"relays_seen": item.RelaysSeen,
-			},
-			Links: []SirenLink{
-				{
-					Rel:  []string{"author"},
-					Href: "/profiles/" + item.Pubkey,
-				},
-			},
-			Actions: []SirenAction{
-				{
-					Name:   "react",
-					Title:  "React to this event",
-					Method: "POST",
-					Href:   "/actions/react",
-					Type:   "application/json",
-					Fields: []SirenField{
-						{Name: "event_id", Type: "text", Value: item.ID},
-						{Name: "reaction", Type: "text", Value: "+"},
-					},
-				},
-			},
+		props := map[string]interface{}{
+			"id":          item.ID,
+			"kind":        item.Kind,
+			"pubkey":      item.Pubkey,
+			"created_at":  item.CreatedAt,
+			"content":     item.Content,
+			"tags":        item.Tags,
+			"sig":         item.Sig,
+			"relays_seen": item.RelaysSeen,
 		}
 
-		// Add thread link if this is a reply
-		for _, tag := range item.Tags {
-			if len(tag) >= 2 && tag[0] == "e" {
-				subEntity.Links = append(subEntity.Links, SirenLink{
-					Rel:  []string{"thread"},
-					Href: "/threads/" + tag[1],
-				})
-				break
+		// Add author profile if available
+		if item.AuthorProfile != nil {
+			props["author_profile"] = map[string]interface{}{
+				"name":         item.AuthorProfile.Name,
+				"display_name": item.AuthorProfile.DisplayName,
+				"picture":      item.AuthorProfile.Picture,
+				"nip05":        item.AuthorProfile.Nip05,
 			}
+		}
+
+		// Add reactions if available
+		if item.Reactions != nil {
+			props["reactions"] = map[string]interface{}{
+				"total":   item.Reactions.Total,
+				"by_type": item.Reactions.ByType,
+			}
+		}
+
+		subEntity := SirenSubEntity{
+			Class:      []string{"event", "note"},
+			Rel:        []string{"item"},
+			Properties: props,
+			Links:      []SirenLink{},
+			Actions:    []SirenAction{},
 		}
 
 		entity.Entities = append(entity.Entities, subEntity)
@@ -121,19 +113,6 @@ func toSirenTimeline(resp TimelineResponse, relays []string, authors []string, k
 			Href: *resp.Page.Next,
 		})
 	}
-
-	// Add publish action
-	entity.Actions = append(entity.Actions, SirenAction{
-		Name:   "publish",
-		Title:  "Publish a new note",
-		Method: "POST",
-		Href:   "/events",
-		Type:   "application/json",
-		Fields: []SirenField{
-			{Name: "content", Type: "text", Title: "Note content"},
-			{Name: "tags", Type: "text", Title: "Tags (optional JSON array)"},
-		},
-	})
 
 	return entity
 }

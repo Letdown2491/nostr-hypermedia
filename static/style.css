@@ -165,11 +165,101 @@ main {
   box-shadow: 0 2px 8px rgba(0,0,0,0.1);
 }
 
+/* Note author header */
+.note-author {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.author-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid #e1e4e8;
+}
+
+.author-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.author-name {
+  font-weight: 600;
+  font-size: 15px;
+  color: #24292e;
+}
+
+.author-nip05 {
+  font-size: 12px;
+  color: #667eea;
+}
+
 .note-content {
   font-size: 15px;
   line-height: 1.6;
   margin: 12px 0;
   color: #24292e;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow: hidden;
+  max-width: 100%;
+}
+
+/* Images in notes */
+.note-image {
+  max-width: 100%;
+  width: auto;
+  height: auto;
+  max-height: 350px;
+  border-radius: 8px;
+  margin: 8px 0;
+  cursor: pointer;
+  display: block;
+  object-fit: contain;
+  background: #f5f5f5;
+}
+
+.note-image:hover {
+  opacity: 0.9;
+}
+
+.note-link {
+  color: #667eea;
+  word-break: break-all;
+}
+
+.note-content > div {
+  max-width: 100%;
+}
+
+/* Reactions */
+.note-reactions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 12px 0;
+  padding: 8px 0;
+  border-top: 1px solid #e1e4e8;
+}
+
+.reaction-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  background: #f0f0f0;
+  border-radius: 16px;
+  font-size: 13px;
+  color: #555;
+}
+
+.reaction-badge:first-child {
+  background: #e7eaff;
+  color: #667eea;
 }
 
 .note-meta {
@@ -349,4 +439,201 @@ footer {
   color: #666;
   font-size: 13px;
   border-top: 1px solid #dee2e6;
+}
+
+/* Login section */
+#login-section {
+  display: inline-block;
+}
+
+#user-status {
+  margin-top: 10px;
+}
+
+.logged-in {
+  font-size: 12px;
+  background: rgba(255,255,255,0.2);
+  padding: 4px 12px;
+  border-radius: 4px;
+}
+
+/* Modal */
+.modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: white;
+  padding: 30px;
+  border-radius: 8px;
+  max-width: 400px;
+  width: 90%;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+}
+
+.modal-content h2 {
+  margin-bottom: 16px;
+  color: #333;
+}
+
+.modal-content .warning {
+  font-size: 13px;
+  color: #856404;
+  background: #fff3cd;
+  padding: 10px;
+  border-radius: 4px;
+  margin-bottom: 16px;
+}
+
+.modal-content input {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  font-size: 14px;
+  font-family: monospace;
+  margin-bottom: 16px;
+}
+
+.modal-buttons {
+  display: flex;
+  gap: 10px;
+}
+
+.modal-buttons button {
+  flex: 1;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.modal-buttons button:first-child {
+  background: #667eea;
+  color: white;
+}
+
+.modal-buttons button.secondary {
+  background: #e9ecef;
+  color: #495057;
+}
+
+.modal-content .error {
+  color: #c33;
+  font-size: 13px;
+  margin-top: 12px;
+  padding: 8px;
+  background: #fee;
+  border-radius: 4px;
+}
+
+/* Reply indicator */
+.note-reply-indicator {
+  font-size: 12px;
+  color: #667eea;
+  padding: 6px 10px;
+  background: #f0f4ff;
+  border-radius: 4px;
+  margin-bottom: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.note-reply-indicator:hover {
+  background: #e0e8ff;
+}
+
+.reply-icon {
+  font-size: 14px;
+}
+
+.reply-id {
+  font-family: monospace;
+  font-size: 11px;
+}
+
+/* Thread view */
+.thread-view {
+  padding: 0;
+}
+
+.back-btn {
+  padding: 8px 16px;
+  background: #667eea;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  margin-bottom: 16px;
+}
+
+.back-btn:hover {
+  background: #5568d3;
+}
+
+.thread-header {
+  font-size: 20px;
+  color: #333;
+  margin-bottom: 16px;
+}
+
+.thread-root {
+  border-left: 4px solid #667eea;
+  padding-left: 12px;
+  margin-bottom: 24px;
+}
+
+.thread-root .note {
+  background: #fafbff;
+}
+
+.replies-header {
+  font-size: 16px;
+  color: #555;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #e1e4e8;
+}
+
+.thread-replies {
+  margin-left: 20px;
+  border-left: 2px solid #e1e4e8;
+  padding-left: 16px;
+}
+
+.thread-reply {
+  margin-bottom: 12px;
+}
+
+.thread-reply .note {
+  background: white;
+}
+
+/* View thread button */
+.view-thread-btn {
+  font-size: 12px;
+  color: #667eea;
+  background: none;
+  border: 1px solid #667eea;
+  border-radius: 4px;
+  padding: 4px 8px;
+  cursor: pointer;
+  margin-left: auto;
+}
+
+.view-thread-btn:hover {
+  background: #667eea;
+  color: white;
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"net/http"
+	"sync"
 )
 
 func htmlTimelineHandler(w http.ResponseWriter, r *http.Request) {
@@ -22,6 +23,7 @@ func htmlTimelineHandler(w http.ResponseWriter, r *http.Request) {
 	limit := parseLimit(q.Get("limit"), 50)
 	since := parseInt64(q.Get("since"))
 	until := parseInt64(q.Get("until"))
+	fast := q.Get("fast") == "1" || q.Get("fast") == "true"
 
 	// Build filter
 	filter := Filter{
@@ -35,18 +37,58 @@ func htmlTimelineHandler(w http.ResponseWriter, r *http.Request) {
 	// Fetch events from relays
 	events, eose := fetchEventsFromRelays(relays, filter)
 
+	// Collect unique pubkeys and event IDs for enrichment
+	pubkeySet := make(map[string]bool)
+	eventIDs := make([]string, 0, len(events))
+	for _, evt := range events {
+		if evt.Kind == 1 { // Only for notes
+			pubkeySet[evt.PubKey] = true
+			eventIDs = append(eventIDs, evt.ID)
+		}
+	}
+
+	// Always fetch profiles, only fetch reactions in full mode
+	profiles := make(map[string]*ProfileInfo)
+	reactions := make(map[string]*ReactionsSummary)
+
+	var wg sync.WaitGroup
+
+	if len(pubkeySet) > 0 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			pubkeys := make([]string, 0, len(pubkeySet))
+			for pk := range pubkeySet {
+				pubkeys = append(pubkeys, pk)
+			}
+			profiles = fetchProfiles(relays, pubkeys)
+		}()
+	}
+
+	if !fast && len(eventIDs) > 0 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			reactions = fetchReactions(relays, eventIDs)
+		}()
+	}
+
+	wg.Wait()
+
 	// Build response
 	items := make([]EventItem, len(events))
 	for i, evt := range events {
 		items[i] = EventItem{
-			ID:         evt.ID,
-			Kind:       evt.Kind,
-			Pubkey:     evt.PubKey,
-			CreatedAt:  evt.CreatedAt,
-			Content:    evt.Content,
-			Tags:       evt.Tags,
-			Sig:        evt.Sig,
-			RelaysSeen: evt.RelaysSeen,
+			ID:            evt.ID,
+			Kind:          evt.Kind,
+			Pubkey:        evt.PubKey,
+			CreatedAt:     evt.CreatedAt,
+			Content:       evt.Content,
+			Tags:          evt.Tags,
+			Sig:           evt.Sig,
+			RelaysSeen:    evt.RelaysSeen,
+			AuthorProfile: profiles[evt.PubKey],
+			Reactions:     reactions[evt.ID],
 		}
 	}
 

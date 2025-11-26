@@ -11,11 +11,16 @@
     <header>
       <h1>Nostr Hypermedia Browser</h1>
       <p class="subtitle">A generic Siren client for exploring Nostr</p>
+      <div id="user-status"></div>
     </header>
 
     <nav id="navigation">
-      <button onclick="navigate('/timeline?kinds=1&limit=20')">Timeline</button>
-      <button onclick="navigate('/timeline?kinds=1,7&limit=20')">Timeline + Reactions</button>
+      <div id="login-section">
+        <button id="login-btn" onclick="showLoginModal()">Login with nsec</button>
+      </div>
+      <button onclick="loadTimeline()">Timeline</button>
+      <button onclick="loadTimelineFull()">Full (slow)</button>
+      <button id="follows-btn" onclick="loadFollowsTimeline()" style="display: none;">Follows</button>
     </nav>
 
     <main id="content">
@@ -27,6 +32,20 @@
     </footer>
   </div>
 
-  <script src="/static/app.js"></script>
+  <!-- Login Modal -->
+  <div id="login-modal" class="modal" style="display: none;">
+    <div class="modal-content">
+      <h2>Login with nsec</h2>
+      <p class="warning">Your nsec will only be stored in memory and used locally.</p>
+      <input type="password" id="nsec-input" placeholder="nsec1..." autocomplete="off">
+      <div class="modal-buttons">
+        <button onclick="doLogin()">Login</button>
+        <button onclick="hideLoginModal()" class="secondary">Cancel</button>
+      </div>
+      <p id="login-error" class="error" style="display: none;"></p>
+    </div>
+  </div>
+
+  <script type="module" src="/static/app.js"></script>
 </body>
 </html>

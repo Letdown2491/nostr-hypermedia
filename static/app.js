@@ -1,9 +1,210 @@
 // Generic Siren hypermedia client
+import * as secp256k1 from 'https://esm.sh/@noble/secp256k1@2.1.0';
 
 let currentEntity = null;
+let userState = {
+  privateKey: null,
+  publicKey: null,
+  follows: []
+};
 
-// Navigate to a URL and render the Siren response
-async function navigate(url) {
+// Bech32 decoding (NIP-19)
+const BECH32_CHARSET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
+
+function bech32Decode(str) {
+  str = str.toLowerCase();
+  const pos = str.lastIndexOf('1');
+  if (pos < 1 || pos + 7 > str.length) throw new Error('Invalid bech32 string');
+
+  const hrp = str.slice(0, pos);
+  const data = str.slice(pos + 1);
+
+  const values = [];
+  for (const char of data) {
+    const idx = BECH32_CHARSET.indexOf(char);
+    if (idx === -1) throw new Error('Invalid character in bech32 string');
+    values.push(idx);
+  }
+
+  // Remove checksum (last 6 characters)
+  const dataValues = values.slice(0, -6);
+
+  // Convert 5-bit groups to 8-bit bytes
+  const bytes = convertBits(dataValues, 5, 8, false);
+
+  return { hrp, bytes };
+}
+
+function convertBits(data, fromBits, toBits, pad) {
+  let acc = 0;
+  let bits = 0;
+  const result = [];
+  const maxv = (1 << toBits) - 1;
+
+  for (const value of data) {
+    acc = (acc << fromBits) | value;
+    bits += fromBits;
+    while (bits >= toBits) {
+      bits -= toBits;
+      result.push((acc >> bits) & maxv);
+    }
+  }
+
+  if (pad && bits > 0) {
+    result.push((acc << (toBits - bits)) & maxv);
+  }
+
+  return new Uint8Array(result);
+}
+
+function bytesToHex(bytes) {
+  return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function hexToBytes(hex) {
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < hex.length; i += 2) {
+    bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
+  }
+  return bytes;
+}
+
+// Derive public key from private key using secp256k1
+async function derivePublicKey(privateKeyHex) {
+  const privateKeyBytes = hexToBytes(privateKeyHex);
+  const publicKeyBytes = secp256k1.getPublicKey(privateKeyBytes, true);
+  // Remove the prefix byte (02 or 03) for x-only pubkey
+  return bytesToHex(publicKeyBytes.slice(1));
+}
+
+// Login functions
+async function doLogin() {
+  const nsecInput = document.getElementById('nsec-input');
+  const errorEl = document.getElementById('login-error');
+  errorEl.style.display = 'none';
+
+  try {
+    const nsec = nsecInput.value.trim();
+    if (!nsec.startsWith('nsec1')) {
+      throw new Error('Invalid nsec format. Must start with nsec1');
+    }
+
+    const decoded = bech32Decode(nsec);
+    if (decoded.hrp !== 'nsec') {
+      throw new Error('Invalid nsec prefix');
+    }
+
+    const privateKeyHex = bytesToHex(decoded.bytes);
+    if (privateKeyHex.length !== 64) {
+      throw new Error('Invalid private key length');
+    }
+
+    const publicKeyHex = await derivePublicKey(privateKeyHex);
+
+    userState.privateKey = privateKeyHex;
+    userState.publicKey = publicKeyHex;
+
+    // Fetch follows list
+    await fetchFollowsList();
+
+    updateUserUI();
+    hideLoginModal();
+    nsecInput.value = '';
+
+  } catch (error) {
+    errorEl.textContent = error.message;
+    errorEl.style.display = 'block';
+  }
+}
+
+function logout() {
+  userState.privateKey = null;
+  userState.publicKey = null;
+  userState.follows = [];
+  updateUserUI();
+}
+
+function updateUserUI() {
+  const loginBtn = document.getElementById('login-btn');
+  const followsBtn = document.getElementById('follows-btn');
+  const userStatus = document.getElementById('user-status');
+
+  if (userState.publicKey) {
+    loginBtn.textContent = 'Logout';
+    loginBtn.onclick = logout;
+    followsBtn.style.display = 'inline-block';
+    userStatus.innerHTML = `<span class="logged-in">Logged in: ${userState.publicKey.substring(0, 12)}... (${userState.follows.length} follows)</span>`;
+  } else {
+    loginBtn.textContent = 'Login with nsec';
+    loginBtn.onclick = showLoginModal;
+    followsBtn.style.display = 'none';
+    userStatus.innerHTML = '';
+  }
+}
+
+async function fetchFollowsList() {
+  if (!userState.publicKey) return;
+
+  try {
+    // Fetch kind 3 (follow list) for the logged-in user
+    const response = await fetch(`/timeline?kinds=3&authors=${userState.publicKey}&limit=1`, {
+      headers: { 'Accept': 'application/vnd.siren+json' }
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch follows');
+
+    const entity = await response.json();
+
+    // Extract p tags from the follow list event
+    if (entity.entities && entity.entities.length > 0) {
+      const followEvent = entity.entities[0];
+      const tags = followEvent.properties?.tags || [];
+
+      userState.follows = tags
+        .filter(tag => tag[0] === 'p')
+        .map(tag => tag[1]);
+    }
+  } catch (error) {
+    console.error('Failed to fetch follows:', error);
+  }
+}
+
+function showLoginModal() {
+  document.getElementById('login-modal').style.display = 'flex';
+  document.getElementById('nsec-input').focus();
+}
+
+function hideLoginModal() {
+  document.getElementById('login-modal').style.display = 'none';
+  document.getElementById('login-error').style.display = 'none';
+}
+
+function loadTimeline() {
+  navigate('/timeline?kinds=1&limit=20&fast=1');
+}
+
+function loadFollowsTimeline() {
+  if (userState.follows.length === 0) {
+    alert('No follows found. Make sure you are logged in and have a follow list.');
+    return;
+  }
+
+  // Limit to first 50 follows to avoid URL length issues
+  const authorsParam = userState.follows.slice(0, 50).join(',');
+  navigate(`/timeline?kinds=1&limit=20&authors=${authorsParam}&fast=1`);
+}
+
+// Expose functions to window for onclick handlers
+window.showLoginModal = showLoginModal;
+window.hideLoginModal = hideLoginModal;
+window.doLogin = doLogin;
+window.logout = logout;
+window.loadTimeline = loadTimeline;
+window.loadFollowsTimeline = loadFollowsTimeline;
+window.navigate = navigate;
+
+// Navigate to a URL and render the response
+async function navigate(url, skipPushState = false) {
   const content = document.getElementById('content');
   content.innerHTML = '<div class="loading">Loading...</div>';
 
@@ -18,13 +219,58 @@ async function navigate(url) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
 
-    const entity = await response.json();
-    currentEntity = entity;
-    renderEntity(entity, content);
+    const data = await response.json();
+    currentEntity = data;
+
+    // Update browser history
+    if (!skipPushState) {
+      const displayUrl = urlToDisplayPath(url);
+      history.pushState({ url }, '', displayUrl);
+    }
+
+    // Check if this is a thread response
+    if (isThreadResponse(data)) {
+      renderThread(data, content);
+    } else {
+      renderEntity(data, content);
+    }
   } catch (error) {
     content.innerHTML = `<div class="error">Error loading content: ${error.message}</div>`;
   }
 }
+
+// Convert API URL to display path (e.g., /timeline?kinds=1 -> /timeline or /thread/abc -> /thread/abc)
+function urlToDisplayPath(url) {
+  if (url.startsWith('/thread/')) {
+    return url;
+  }
+  if (url.startsWith('/timeline')) {
+    return '/timeline';
+  }
+  return url.split('?')[0] || '/';
+}
+
+// Convert display path back to API URL
+function displayPathToUrl(path) {
+  if (path === '/' || path === '' || path === '/timeline') {
+    return '/timeline?kinds=1&limit=20&fast=1';
+  }
+  if (path.startsWith('/thread/')) {
+    return path;
+  }
+  return path;
+}
+
+// Handle browser back/forward
+window.addEventListener('popstate', (event) => {
+  if (event.state && event.state.url) {
+    navigate(event.state.url, true);
+  } else {
+    // No state, navigate based on current path
+    const url = displayPathToUrl(window.location.pathname);
+    navigate(url, true);
+  }
+});
 
 // Render a Siren entity
 function renderEntity(entity, container) {
@@ -170,30 +416,178 @@ function renderSubEntity(subEntity) {
   return div;
 }
 
+// Extract reply information from tags (NIP-10)
+function getReplyInfo(tags) {
+  if (!tags || !Array.isArray(tags)) {
+    return { isReply: false };
+  }
+
+  let root = null;
+  let replyTo = null;
+
+  // NIP-10: Look for e tags with markers or positional
+  const eTags = tags.filter(t => t[0] === 'e');
+
+  for (const tag of eTags) {
+    const marker = tag[3]; // Optional marker (root, reply, mention)
+    if (marker === 'root') {
+      root = tag[1];
+    } else if (marker === 'reply') {
+      replyTo = tag[1];
+    }
+  }
+
+  // If no markers, use positional (first = root, last = reply)
+  if (!root && !replyTo && eTags.length > 0) {
+    if (eTags.length === 1) {
+      replyTo = eTags[0][1];
+      root = eTags[0][1];
+    } else {
+      root = eTags[0][1];
+      replyTo = eTags[eTags.length - 1][1];
+    }
+  }
+
+  return {
+    isReply: eTags.length > 0,
+    root,
+    replyTo
+  };
+}
+
+// Parse content and render images, links, etc.
+function renderContent(content) {
+  const container = document.createElement('div');
+
+  // Image URL regex - matches common image extensions
+  const imageRegex = /(https?:\/\/[^\s]+\.(?:jpg|jpeg|png|gif|webp|svg|bmp)(?:\?[^\s]*)?)/gi;
+
+  // Split content by image URLs
+  const parts = content.split(imageRegex);
+
+  parts.forEach((part, index) => {
+    if (imageRegex.test(part)) {
+      // Reset regex lastIndex
+      imageRegex.lastIndex = 0;
+
+      // This is an image URL - render as img tag
+      const img = document.createElement('img');
+      img.src = part;
+      img.className = 'note-image';
+      img.loading = 'lazy';
+      img.onclick = () => window.open(part, '_blank');
+      img.onerror = () => {
+        // If image fails to load, show as link instead
+        const link = document.createElement('a');
+        link.href = part;
+        link.target = '_blank';
+        link.textContent = part;
+        link.className = 'note-link';
+        img.replaceWith(link);
+      };
+      container.appendChild(img);
+    } else if (part) {
+      // Regular text - preserve line breaks
+      const textSpan = document.createElement('span');
+      textSpan.textContent = part;
+      container.appendChild(textSpan);
+    }
+  });
+
+  return container;
+}
+
 // Specialized rendering for Nostr notes
 function renderNote(props) {
   const noteDiv = document.createElement('div');
   noteDiv.className = 'note';
 
-  // Content
-  if (props.content) {
-    const contentDiv = document.createElement('div');
-    contentDiv.className = 'note-content';
-    contentDiv.textContent = props.content;
-    noteDiv.appendChild(contentDiv);
+  // Author header with profile info
+  const authorDiv = document.createElement('div');
+  authorDiv.className = 'note-author';
+
+  // Profile picture (if available)
+  if (props.author_profile && props.author_profile.picture) {
+    const avatarImg = document.createElement('img');
+    avatarImg.className = 'author-avatar';
+    avatarImg.src = props.author_profile.picture;
+    avatarImg.alt = 'avatar';
+    avatarImg.onerror = () => { avatarImg.style.display = 'none'; };
+    authorDiv.appendChild(avatarImg);
   }
 
-  // Metadata
-  const metaDiv = document.createElement('div');
-  metaDiv.className = 'note-meta';
+  // Author name and pubkey
+  const authorInfoDiv = document.createElement('div');
+  authorInfoDiv.className = 'author-info';
+
+  if (props.author_profile && (props.author_profile.display_name || props.author_profile.name)) {
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'author-name';
+    nameSpan.textContent = props.author_profile.display_name || props.author_profile.name;
+    authorInfoDiv.appendChild(nameSpan);
+
+    // NIP-05 verification
+    if (props.author_profile.nip05) {
+      const nip05Span = document.createElement('span');
+      nip05Span.className = 'author-nip05';
+      nip05Span.textContent = props.author_profile.nip05;
+      authorInfoDiv.appendChild(nip05Span);
+    }
+  }
 
   if (props.pubkey) {
     const pubkeySpan = document.createElement('span');
     pubkeySpan.className = 'pubkey';
-    pubkeySpan.textContent = props.pubkey.substring(0, 16) + '...';
+    pubkeySpan.textContent = props.pubkey.substring(0, 12) + '...';
     pubkeySpan.title = props.pubkey;
-    metaDiv.appendChild(pubkeySpan);
+    authorInfoDiv.appendChild(pubkeySpan);
   }
+
+  authorDiv.appendChild(authorInfoDiv);
+  noteDiv.appendChild(authorDiv);
+
+  // Check if this is a reply (has e tags)
+  const replyInfo = getReplyInfo(props.tags);
+  if (replyInfo.isReply) {
+    const replyDiv = document.createElement('div');
+    replyDiv.className = 'note-reply-indicator';
+    replyDiv.innerHTML = `<span class="reply-icon">↩</span> Replying to <span class="reply-id">${replyInfo.replyTo.substring(0, 8)}...</span>`;
+    replyDiv.onclick = () => navigate(`/thread/${replyInfo.root || replyInfo.replyTo}`);
+    replyDiv.style.cursor = 'pointer';
+    noteDiv.appendChild(replyDiv);
+  }
+
+  // Content - render with images
+  if (props.content) {
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'note-content';
+    const renderedContent = renderContent(props.content);
+    contentDiv.appendChild(renderedContent);
+    noteDiv.appendChild(contentDiv);
+  }
+
+  // Reactions
+  if (props.reactions && props.reactions.total > 0) {
+    const reactionsDiv = document.createElement('div');
+    reactionsDiv.className = 'note-reactions';
+
+    // Show reaction counts by type
+    const byType = props.reactions.by_type || {};
+    const sortedTypes = Object.entries(byType).sort((a, b) => b[1] - a[1]);
+
+    for (const [type, count] of sortedTypes) {
+      const reactionSpan = document.createElement('span');
+      reactionSpan.className = 'reaction-badge';
+      reactionSpan.textContent = `${type} ${count}`;
+      reactionsDiv.appendChild(reactionSpan);
+    }
+
+    noteDiv.appendChild(reactionsDiv);
+  }
+
+  // Metadata footer
+  const metaDiv = document.createElement('div');
+  metaDiv.className = 'note-meta';
 
   if (props.created_at) {
     const timeSpan = document.createElement('span');
@@ -203,17 +597,23 @@ function renderNote(props) {
     metaDiv.appendChild(timeSpan);
   }
 
-  if (props.kind !== undefined) {
-    const kindSpan = document.createElement('span');
-    kindSpan.textContent = `kind: ${props.kind}`;
-    metaDiv.appendChild(kindSpan);
-  }
-
   if (props.relays_seen && props.relays_seen.length > 0) {
     const relaySpan = document.createElement('span');
     relaySpan.textContent = `from ${props.relays_seen.length} relay(s)`;
     relaySpan.title = props.relays_seen.join(', ');
     metaDiv.appendChild(relaySpan);
+  }
+
+  // View Thread button - only show if this note is a reply (part of a thread)
+  if (props.id && replyInfo.isReply) {
+    const threadBtn = document.createElement('button');
+    threadBtn.className = 'view-thread-btn';
+    threadBtn.textContent = 'View Thread';
+    threadBtn.onclick = (e) => {
+      e.stopPropagation();
+      navigate(`/thread/${replyInfo.root || props.id}`);
+    };
+    metaDiv.appendChild(threadBtn);
   }
 
   noteDiv.appendChild(metaDiv);
@@ -379,7 +779,75 @@ async function executeAction(action, form) {
   }
 }
 
-// Initialize by loading the default timeline
+// Check if the response is a thread or timeline and render appropriately
+function isThreadResponse(data) {
+  return data.root !== undefined && data.replies !== undefined;
+}
+
+// Render a thread view
+function renderThread(threadData, container) {
+  container.innerHTML = '';
+
+  const threadDiv = document.createElement('div');
+  threadDiv.className = 'thread-view';
+
+  // Back button
+  const backBtn = document.createElement('button');
+  backBtn.className = 'back-btn';
+  backBtn.textContent = '← Back to Timeline';
+  backBtn.onclick = () => navigate('/timeline?kinds=1&limit=20&fast=1');
+  threadDiv.appendChild(backBtn);
+
+  // Thread header
+  const header = document.createElement('h2');
+  header.className = 'thread-header';
+  header.textContent = `Thread (${threadData.replies.length} replies)`;
+  threadDiv.appendChild(header);
+
+  // Root note (highlighted)
+  const rootDiv = document.createElement('div');
+  rootDiv.className = 'thread-root';
+  const rootNote = renderNote(threadData.root);
+  rootDiv.appendChild(rootNote);
+  threadDiv.appendChild(rootDiv);
+
+  // Replies
+  if (threadData.replies.length > 0) {
+    const repliesHeader = document.createElement('h3');
+    repliesHeader.className = 'replies-header';
+    repliesHeader.textContent = 'Replies';
+    threadDiv.appendChild(repliesHeader);
+
+    const repliesDiv = document.createElement('div');
+    repliesDiv.className = 'thread-replies';
+
+    threadData.replies.forEach(reply => {
+      const replyDiv = document.createElement('div');
+      replyDiv.className = 'thread-reply';
+      const replyNote = renderNote(reply);
+      replyDiv.appendChild(replyNote);
+      repliesDiv.appendChild(replyDiv);
+    });
+
+    threadDiv.appendChild(repliesDiv);
+  }
+
+  container.appendChild(threadDiv);
+}
+
+// Initialize based on current URL path
 window.onload = () => {
-  navigate('/timeline?kinds=1&limit=20');
+  const path = window.location.pathname;
+  const url = displayPathToUrl(path);
+
+  // Replace current history state with the API URL
+  history.replaceState({ url }, '', path === '/' ? '/timeline' : path);
+
+  navigate(url, true); // Skip pushState since we just did replaceState
 };
+
+// Load timeline with full enrichment (profiles and reactions) - slower
+function loadTimelineFull() {
+  navigate('/timeline?kinds=1&limit=10');
+}
+window.loadTimelineFull = loadTimelineFull;

@@ -6,9 +6,16 @@
       "Bash(/home/vcavallo/.local/share/mise/installs/go/1.25.1/bin/go build -o nostr-server .)",
       "Bash(./nostr-server)",
       "Bash(curl:*)",
-      "Bash(PORT=3000 ./nostr-server)"
+      "Bash(PORT=3000 ./nostr-server)",
+      "mcp__nostr__read_kind",
+      "mcp__nostr__read_nip",
+      "Bash(time curl:*)"
     ],
     "deny": [],
     "ask": []
-  }
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "nostr"
+  ]
 }

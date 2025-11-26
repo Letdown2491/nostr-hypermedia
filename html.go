@@ -88,6 +88,55 @@ var htmlTemplate = `<!DOCTYPE html>
       white-space: pre-wrap;
       word-wrap: break-word;
     }
+    .note-author {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .author-avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      object-fit: cover;
+      border: 2px solid #e1e4e8;
+    }
+    .author-info {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .author-name {
+      font-weight: 600;
+      font-size: 15px;
+      color: #24292e;
+    }
+    .author-nip05 {
+      font-size: 12px;
+      color: #667eea;
+    }
+    .note-reactions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin: 12px 0;
+      padding: 8px 0;
+      border-top: 1px solid #e1e4e8;
+    }
+    .reaction-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 10px;
+      background: #f0f0f0;
+      border-radius: 16px;
+      font-size: 13px;
+      color: #555;
+    }
+    .reaction-badge:first-child {
+      background: #e7eaff;
+      color: #667eea;
+    }
     .note-meta {
       display: flex;
       gap: 16px;
@@ -205,8 +254,8 @@ var htmlTemplate = `<!DOCTYPE html>
     </header>
 
     <nav>
-      <a href="/html/timeline?kinds=1&limit=20">Timeline</a>
-      <a href="/html/timeline?kinds=1,7&limit=20">Timeline + Reactions</a>
+      <a href="/html/timeline?kinds=1&limit=20&fast=1">Timeline</a>
+      <a href="/html/timeline?kinds=1&limit=10">Full (slow)</a>
       <a href="/">JS Client</a>
     </nav>
 
@@ -231,11 +280,32 @@ var htmlTemplate = `<!DOCTYPE html>
 
       {{range .Items}}
       <article class="note">
+        <div class="note-author">
+          {{if and .AuthorProfile .AuthorProfile.Picture}}
+          <img class="author-avatar" src="{{.AuthorProfile.Picture}}" alt="avatar" onerror="this.style.display='none'">
+          {{end}}
+          <div class="author-info">
+            {{if .AuthorProfile}}
+            {{if or .AuthorProfile.DisplayName .AuthorProfile.Name}}
+            <span class="author-name">{{if .AuthorProfile.DisplayName}}{{.AuthorProfile.DisplayName}}{{else}}{{.AuthorProfile.Name}}{{end}}</span>
+            {{end}}
+            {{if .AuthorProfile.Nip05}}
+            <span class="author-nip05">{{.AuthorProfile.Nip05}}</span>
+            {{end}}
+            {{end}}
+            <span class="pubkey" title="{{.Pubkey}}">{{slice .Pubkey 0 12}}...</span>
+          </div>
+        </div>
         <div class="note-content">{{.Content}}</div>
+        {{if and .Reactions (gt .Reactions.Total 0)}}
+        <div class="note-reactions">
+          {{range $type, $count := .Reactions.ByType}}
+          <span class="reaction-badge">{{$type}} {{$count}}</span>
+          {{end}}
+        </div>
+        {{end}}
         <div class="note-meta">
-          <span class="pubkey" title="{{.Pubkey}}">{{slice .Pubkey 0 16}}...</span>
           <span>{{formatTime .CreatedAt}}</span>
-          <span>kind: {{.Kind}}</span>
           {{if .RelaysSeen}}
           <span title="{{join .RelaysSeen ", "}}">from {{len .RelaysSeen}} relay(s)</span>
           {{end}}
@@ -301,13 +371,15 @@ type HTMLPageData struct {
 }
 
 type HTMLEventItem struct {
-	ID         string
-	Kind       int
-	Pubkey     string
-	CreatedAt  int64
-	Content    string
-	RelaysSeen []string
-	Links      []string
+	ID            string
+	Kind          int
+	Pubkey        string
+	CreatedAt     int64
+	Content       string
+	RelaysSeen    []string
+	Links         []string
+	AuthorProfile *ProfileInfo
+	Reactions     *ReactionsSummary
 }
 
 type HTMLPagination struct {
@@ -332,13 +404,15 @@ func renderHTML(resp TimelineResponse, relays []string, authors []string, kinds 
 	items := make([]HTMLEventItem, len(resp.Items))
 	for i, item := range resp.Items {
 		items[i] = HTMLEventItem{
-			ID:         item.ID,
-			Kind:       item.Kind,
-			Pubkey:     item.Pubkey,
-			CreatedAt:  item.CreatedAt,
-			Content:    item.Content,
-			RelaysSeen: item.RelaysSeen,
-			Links:      []string{},
+			ID:            item.ID,
+			Kind:          item.Kind,
+			Pubkey:        item.Pubkey,
+			CreatedAt:     item.CreatedAt,
+			Content:       item.Content,
+			RelaysSeen:    item.RelaysSeen,
+			Links:         []string{},
+			AuthorProfile: item.AuthorProfile,
+			Reactions:     item.Reactions,
 		}
 
 		// Add profile link
@@ -397,6 +471,9 @@ func renderHTML(resp TimelineResponse, relays []string, authors []string, kinds 
 		},
 		"title": func(s string) string {
 			return strings.Title(strings.ReplaceAll(s, "_", " "))
+		},
+		"gt": func(a, b int) bool {
+			return a > b
 		},
 	}
 

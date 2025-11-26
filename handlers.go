@@ -4,9 +4,12 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -17,14 +20,28 @@ type TimelineResponse struct {
 }
 
 type EventItem struct {
-	ID         string     `json:"id"`
-	Kind       int        `json:"kind"`
-	Pubkey     string     `json:"pubkey"`
-	CreatedAt  int64      `json:"created_at"`
-	Content    string     `json:"content"`
-	Tags       [][]string `json:"tags"`
-	Sig        string     `json:"sig"`
-	RelaysSeen []string   `json:"relays_seen"`
+	ID            string            `json:"id"`
+	Kind          int               `json:"kind"`
+	Pubkey        string            `json:"pubkey"`
+	CreatedAt     int64             `json:"created_at"`
+	Content       string            `json:"content"`
+	Tags          [][]string        `json:"tags"`
+	Sig           string            `json:"sig"`
+	RelaysSeen    []string          `json:"relays_seen"`
+	AuthorProfile *ProfileInfo      `json:"author_profile,omitempty"`
+	Reactions     *ReactionsSummary `json:"reactions,omitempty"`
+}
+
+type ProfileInfo struct {
+	Name        string `json:"name,omitempty"`
+	DisplayName string `json:"display_name,omitempty"`
+	Picture     string `json:"picture,omitempty"`
+	Nip05       string `json:"nip05,omitempty"`
+}
+
+type ReactionsSummary struct {
+	Total   int            `json:"total"`
+	ByType  map[string]int `json:"by_type"`
 }
 
 type PageInfo struct {
@@ -38,7 +55,20 @@ type MetaInfo struct {
 	GeneratedAt   time.Time `json:"generated_at"`
 }
 
+type ThreadResponse struct {
+	Root    EventItem   `json:"root"`
+	Replies []EventItem `json:"replies"`
+	Meta    MetaInfo    `json:"meta"`
+}
+
 func timelineHandler(w http.ResponseWriter, r *http.Request) {
+	// If browser navigation (Accept: text/html), serve the client app
+	accept := r.Header.Get("Accept")
+	if strings.Contains(accept, "text/html") && !strings.Contains(accept, "application/json") {
+		http.ServeFile(w, r, "./static/index.html")
+		return
+	}
+
 	// Parse query parameters
 	q := r.URL.Query()
 
@@ -47,6 +77,9 @@ func timelineHandler(w http.ResponseWriter, r *http.Request) {
 		relays = []string{
 			"wss://relay.damus.io",
 			"wss://relay.nostr.band",
+			"wss://relay.primal.net",
+			"wss://nos.lol",
+			"wss://nostr.mom",
 		}
 	}
 
@@ -55,6 +88,7 @@ func timelineHandler(w http.ResponseWriter, r *http.Request) {
 	limit := parseLimit(q.Get("limit"), 50)
 	since := parseInt64(q.Get("since"))
 	until := parseInt64(q.Get("until"))
+	fast := q.Get("fast") == "1" || q.Get("fast") == "true"
 
 	// Build filter
 	filter := Filter{
@@ -65,21 +99,84 @@ func timelineHandler(w http.ResponseWriter, r *http.Request) {
 		Until:   until,
 	}
 
+	// Check if we should filter out replies
+	noReplies := q.Get("no_replies") != "0" // Default to filtering replies
+
 	// Fetch events from relays
+	log.Printf("Fetching events: kinds=%v, authors=%v, limit=%d", kinds, authors, limit)
+	start := time.Now()
 	events, eose := fetchEventsFromRelays(relays, filter)
+	log.Printf("Fetched %d events in %v (eose=%v)", len(events), time.Since(start), eose)
+
+	// Filter out replies (events with e tags) from main timeline
+	if noReplies {
+		filtered := make([]Event, 0, len(events))
+		for _, evt := range events {
+			if !isReply(evt) {
+				filtered = append(filtered, evt)
+			}
+		}
+		events = filtered
+		log.Printf("After filtering replies: %d events", len(events))
+	}
+
+	// Collect unique pubkeys and event IDs for enrichment
+	pubkeySet := make(map[string]bool)
+	eventIDs := make([]string, 0, len(events))
+	for _, evt := range events {
+		if evt.Kind == 1 { // Only for notes
+			pubkeySet[evt.PubKey] = true
+			eventIDs = append(eventIDs, evt.ID)
+		}
+	}
+
+	profiles := make(map[string]*ProfileInfo)
+	reactions := make(map[string]*ReactionsSummary)
+
+	// Always fetch profiles (they're quick), only fetch reactions in full mode
+	var wg sync.WaitGroup
+
+	if len(pubkeySet) > 0 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			log.Printf("Fetching profiles for %d authors", len(pubkeySet))
+			pubkeys := make([]string, 0, len(pubkeySet))
+			for pk := range pubkeySet {
+				pubkeys = append(pubkeys, pk)
+			}
+			profiles = fetchProfiles(relays, pubkeys)
+			log.Printf("Fetched %d profiles", len(profiles))
+		}()
+	}
+
+	// Only fetch reactions in full mode (not fast)
+	if !fast && len(eventIDs) > 0 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			log.Printf("Fetching reactions for %d events", len(eventIDs))
+			reactions = fetchReactions(relays, eventIDs)
+			log.Printf("Fetched reactions for %d events", len(reactions))
+		}()
+	}
+
+	wg.Wait()
 
 	// Build response
 	items := make([]EventItem, len(events))
 	for i, evt := range events {
 		items[i] = EventItem{
-			ID:         evt.ID,
-			Kind:       evt.Kind,
-			Pubkey:     evt.PubKey,
-			CreatedAt:  evt.CreatedAt,
-			Content:    evt.Content,
-			Tags:       evt.Tags,
-			Sig:        evt.Sig,
-			RelaysSeen: evt.RelaysSeen,
+			ID:            evt.ID,
+			Kind:          evt.Kind,
+			Pubkey:        evt.PubKey,
+			CreatedAt:     evt.CreatedAt,
+			Content:       evt.Content,
+			Tags:          evt.Tags,
+			Sig:           evt.Sig,
+			RelaysSeen:    evt.RelaysSeen,
+			AuthorProfile: profiles[evt.PubKey],
+			Reactions:     reactions[evt.ID],
 		}
 	}
 
@@ -132,7 +229,6 @@ func timelineHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "max-age=5")
 
 	// Check Accept header for hypermedia format
-	accept := r.Header.Get("Accept")
 	if strings.Contains(accept, "application/vnd.siren+json") {
 		w.Header().Set("Content-Type", "application/vnd.siren+json")
 		siren := toSirenTimeline(resp, relays, authors, kinds, limit)
@@ -197,6 +293,145 @@ func generateETag(items []EventItem) string {
 
 func timeNow() time.Time {
 	return time.Now()
+}
+
+// threadHandler fetches a thread (root event + replies)
+func threadHandler(w http.ResponseWriter, r *http.Request) {
+	// If browser navigation (Accept: text/html), serve the client app
+	accept := r.Header.Get("Accept")
+	if strings.Contains(accept, "text/html") && !strings.Contains(accept, "application/json") {
+		http.ServeFile(w, r, "./static/index.html")
+		return
+	}
+
+	// Extract event ID from path: /thread/{eventId}
+	eventID := strings.TrimPrefix(r.URL.Path, "/thread/")
+	if eventID == "" {
+		http.Error(w, "Event ID required", http.StatusBadRequest)
+		return
+	}
+
+	q := r.URL.Query()
+	relays := parseStringList(q.Get("relays"))
+	if len(relays) == 0 {
+		relays = []string{
+			"wss://relay.damus.io",
+			"wss://relay.nostr.band",
+			"wss://relay.primal.net",
+			"wss://nos.lol",
+			"wss://nostr.mom",
+		}
+	}
+
+	log.Printf("Fetching thread for event: %s", eventID)
+
+	// Fetch the root event and replies in parallel
+	var rootEvent *Event
+	var replies []Event
+	var wg sync.WaitGroup
+
+	// Fetch root event by ID
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		events := fetchEventByID(relays, eventID)
+		if len(events) > 0 {
+			rootEvent = &events[0]
+		}
+	}()
+
+	// Fetch replies (events that reference this event via #e tag)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		replies, _ = fetchEventsFromRelaysWithETags(relays, []string{eventID})
+		// Filter to only kind 1 (notes) that are actual replies
+		filtered := make([]Event, 0)
+		for _, evt := range replies {
+			if evt.Kind == 1 {
+				filtered = append(filtered, evt)
+			}
+		}
+		replies = filtered
+	}()
+
+	wg.Wait()
+
+	if rootEvent == nil {
+		http.Error(w, "Event not found", http.StatusNotFound)
+		return
+	}
+
+	// Collect pubkeys for profile enrichment
+	pubkeySet := make(map[string]bool)
+	pubkeySet[rootEvent.PubKey] = true
+	for _, reply := range replies {
+		pubkeySet[reply.PubKey] = true
+	}
+
+	// Fetch profiles
+	pubkeys := make([]string, 0, len(pubkeySet))
+	for pk := range pubkeySet {
+		pubkeys = append(pubkeys, pk)
+	}
+	profiles := fetchProfiles(relays, pubkeys)
+
+	// Build response
+	rootItem := EventItem{
+		ID:            rootEvent.ID,
+		Kind:          rootEvent.Kind,
+		Pubkey:        rootEvent.PubKey,
+		CreatedAt:     rootEvent.CreatedAt,
+		Content:       rootEvent.Content,
+		Tags:          rootEvent.Tags,
+		Sig:           rootEvent.Sig,
+		RelaysSeen:    rootEvent.RelaysSeen,
+		AuthorProfile: profiles[rootEvent.PubKey],
+	}
+
+	replyItems := make([]EventItem, len(replies))
+	for i, evt := range replies {
+		replyItems[i] = EventItem{
+			ID:            evt.ID,
+			Kind:          evt.Kind,
+			Pubkey:        evt.PubKey,
+			CreatedAt:     evt.CreatedAt,
+			Content:       evt.Content,
+			Tags:          evt.Tags,
+			Sig:           evt.Sig,
+			RelaysSeen:    evt.RelaysSeen,
+			AuthorProfile: profiles[evt.PubKey],
+		}
+	}
+
+	// Sort replies by created_at ASC (oldest first for reading order)
+	sort.Slice(replyItems, func(i, j int) bool {
+		return replyItems[i].CreatedAt < replyItems[j].CreatedAt
+	})
+
+	resp := ThreadResponse{
+		Root:    rootItem,
+		Replies: replyItems,
+		Meta: MetaInfo{
+			QueriedRelays: len(relays),
+			EOSE:          true,
+			GeneratedAt:   time.Now(),
+		},
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "max-age=10")
+	json.NewEncoder(w).Encode(resp)
+}
+
+// isReply checks if an event is a reply (has e tags)
+func isReply(evt Event) bool {
+	for _, tag := range evt.Tags {
+		if len(tag) >= 2 && tag[0] == "e" {
+			return true
+		}
+	}
+	return false
 }
 
 func buildPaginationURL(path string, relays []string, authors []string, kinds []int, limit int, until int64) string {

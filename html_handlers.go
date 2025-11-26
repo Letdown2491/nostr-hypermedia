@@ -152,8 +152,8 @@ func htmlTimelineHandler(w http.ResponseWriter, r *http.Request) {
 	errorMsg := q.Get("error")
 	successMsg := q.Get("success")
 
-	// Render HTML
-	html, err := renderHTML(resp, relays, authors, kinds, limit, session, errorMsg, successMsg)
+	// Render HTML - showReactions is opposite of fast mode
+	html, err := renderHTML(resp, relays, authors, kinds, limit, session, errorMsg, successMsg, !fast)
 	if err != nil {
 		log.Printf("Error rendering HTML: %v", err)
 		http.Error(w, "Error rendering page", http.StatusInternalServerError)

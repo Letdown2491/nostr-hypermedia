@@ -20,10 +20,10 @@ func main() {
 	http.HandleFunc("/timeline", timelineHandler)
 	http.HandleFunc("/thread/", threadHandler)
 
-	// Root path serves HTML client, everything else 404
+	// Root path redirects to HTML timeline, everything else 404
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" {
-			http.ServeFile(w, r, "./static/index.html")
+			http.Redirect(w, r, "/html/timeline?kinds=1&limit=20", http.StatusFound)
 		} else {
 			http.NotFound(w, r)
 		}

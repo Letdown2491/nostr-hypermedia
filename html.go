@@ -270,15 +270,20 @@ var htmlTemplate = `<!DOCTYPE html>
     </header>
 
     <nav>
-      <a href="/html/timeline?kinds=1&limit=20&fast=1">Timeline</a>
-      <a href="/html/timeline?kinds=1&limit=10">Full (slow)</a>
+      <a href="/html/timeline?kinds=1&limit=20">Timeline</a>
       {{if .LoggedIn}}
       <a href="/html/logout">Logout</a>
       {{else}}
       <a href="/html/login">Login</a>
       {{end}}
-      <a href="/">JS Client</a>
     </nav>
+    <div style="margin-bottom:16px;font-size:13px;color:#666;">
+      {{if .ShowReactions}}
+      <span>Reactions: On (slower)</span> · <a href="?kinds=1&limit=20&fast=1">Turn off</a>
+      {{else}}
+      <span>Reactions: Off</span> · <a href="?kinds=1&limit=20">Turn on (slower)</a>
+      {{end}}
+    </div>
 
     <main>
       {{if .Error}}
@@ -411,16 +416,17 @@ var htmlTemplate = `<!DOCTYPE html>
 `
 
 type HTMLPageData struct {
-	Title      string
-	Meta       *MetaInfo
-	Items      []HTMLEventItem
-	Pagination *HTMLPagination
-	Actions    []HTMLAction
-	Links      []string
-	LoggedIn   bool
-	UserPubKey string
-	Error      string
-	Success    string
+	Title         string
+	Meta          *MetaInfo
+	Items         []HTMLEventItem
+	Pagination    *HTMLPagination
+	Actions       []HTMLAction
+	Links         []string
+	LoggedIn      bool
+	UserPubKey    string
+	Error         string
+	Success       string
+	ShowReactions bool // Whether reactions are being fetched (slow mode)
 }
 
 type HTMLEventItem struct {
@@ -487,7 +493,7 @@ func processContentToHTML(content string) template.HTML {
 	return template.HTML(result)
 }
 
-func renderHTML(resp TimelineResponse, relays []string, authors []string, kinds []int, limit int, session *BunkerSession, errorMsg, successMsg string) (string, error) {
+func renderHTML(resp TimelineResponse, relays []string, authors []string, kinds []int, limit int, session *BunkerSession, errorMsg, successMsg string, showReactions bool) (string, error) {
 	// Convert to HTML page data
 	items := make([]HTMLEventItem, len(resp.Items))
 	for i, item := range resp.Items {
@@ -510,9 +516,6 @@ func renderHTML(resp TimelineResponse, relays []string, authors []string, kinds 
 			ReplyCount:    item.ReplyCount,
 		}
 
-		// Add profile link
-		items[i].Links = append(items[i].Links, fmt.Sprintf("/html/profile/%s", item.Pubkey))
-
 		// Add thread link if reply
 		for _, tag := range item.Tags {
 			if len(tag) >= 2 && tag[0] == "e" {
@@ -532,13 +535,14 @@ func renderHTML(resp TimelineResponse, relays []string, authors []string, kinds 
 	}
 
 	data := HTMLPageData{
-		Title:      "Nostr Timeline",
-		Meta:       &resp.Meta,
-		Items:      items,
-		Pagination: pagination,
-		Actions:    []HTMLAction{},
-		Error:      errorMsg,
-		Success:    successMsg,
+		Title:         "Nostr Timeline",
+		Meta:          &resp.Meta,
+		Items:         items,
+		Pagination:    pagination,
+		Actions:       []HTMLAction{},
+		Error:         errorMsg,
+		Success:       successMsg,
+		ShowReactions: showReactions,
 	}
 
 	// Add session info if logged in
@@ -767,8 +771,7 @@ var htmlThreadTemplate = `<!DOCTYPE html>
     </header>
 
     <nav>
-      <a href="/html/timeline?kinds=1&limit=20&fast=1">← Timeline</a>
-      <a href="/">JS Client</a>
+      <a href="/html/timeline?kinds=1&limit=20">← Timeline</a>
     </nav>
 
     <main>
@@ -1190,8 +1193,7 @@ var htmlProfileTemplate = `<!DOCTYPE html>
     </header>
 
     <nav>
-      <a href="/html/timeline?kinds=1&limit=20&fast=1">← Timeline</a>
-      <a href="/">JS Client</a>
+      <a href="/html/timeline?kinds=1&limit=20">← Timeline</a>
     </nav>
 
     <main>

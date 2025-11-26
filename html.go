@@ -793,6 +793,23 @@ var htmlThreadTemplate = `<!DOCTYPE html>
           {{end}}
         </div>
       </article>
+
+      {{if .LoggedIn}}
+      <form method="POST" action="/html/reply" style="background:#f0f4ff;padding:16px;border-radius:8px;border:1px solid #667eea;margin:16px 0;">
+        <input type="hidden" name="reply_to" value="{{.Root.ID}}">
+        <input type="hidden" name="reply_to_pubkey" value="{{.Root.Pubkey}}">
+        <div style="margin-bottom:10px;font-size:13px;color:#666;">
+          Replying as: <span style="font-family:monospace;color:#667eea;">{{slice .UserPubKey 0 12}}...</span>
+        </div>
+        <textarea name="content" placeholder="Write a reply..." required
+                  style="width:100%;padding:12px;border:1px solid #ced4da;border-radius:4px;font-size:14px;font-family:inherit;min-height:60px;resize:vertical;margin-bottom:10px;"></textarea>
+        <button type="submit" style="padding:10px 20px;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:white;border:none;border-radius:4px;font-size:14px;font-weight:600;cursor:pointer;">Reply</button>
+      </form>
+      {{else}}
+      <div style="background:#f8f9fa;padding:12px;border-radius:8px;border:1px solid #dee2e6;margin:16px 0;text-align:center;color:#666;font-size:14px;">
+        <a href="/html/login" style="color:#667eea;">Login</a> to reply
+      </div>
+      {{end}}
       {{end}}
 
       {{if .Replies}}
@@ -838,13 +855,15 @@ var htmlThreadTemplate = `<!DOCTYPE html>
 `
 
 type HTMLThreadData struct {
-	Title   string
-	Meta    *MetaInfo
-	Root    *HTMLEventItem
-	Replies []HTMLEventItem
+	Title      string
+	Meta       *MetaInfo
+	Root       *HTMLEventItem
+	Replies    []HTMLEventItem
+	LoggedIn   bool
+	UserPubKey string
 }
 
-func renderThreadHTML(resp ThreadResponse) (string, error) {
+func renderThreadHTML(resp ThreadResponse, session *BunkerSession) (string, error) {
 	// Convert root to HTML item
 	root := &HTMLEventItem{
 		ID:            resp.Root.ID,
@@ -877,6 +896,12 @@ func renderThreadHTML(resp ThreadResponse) (string, error) {
 		Meta:    &resp.Meta,
 		Root:    root,
 		Replies: replies,
+	}
+
+	// Add session info
+	if session != nil && session.Connected {
+		data.LoggedIn = true
+		data.UserPubKey = hex.EncodeToString(session.UserPubKey)
 	}
 
 	// Template functions

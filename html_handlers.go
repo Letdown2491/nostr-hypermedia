@@ -276,8 +276,11 @@ func htmlThreadHandler(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
+	// Get session for reply form
+	session := getSessionFromRequest(r)
+
 	// Render HTML
-	htmlContent, err := renderThreadHTML(resp)
+	htmlContent, err := renderThreadHTML(resp, session)
 	if err != nil {
 		log.Printf("Error rendering thread HTML: %v", err)
 		http.Error(w, "Error rendering page", http.StatusInternalServerError)

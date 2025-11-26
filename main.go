@@ -33,7 +33,12 @@ func main() {
 	http.HandleFunc("/html/login", htmlLoginHandler)
 	http.HandleFunc("/html/logout", htmlLogoutHandler)
 	http.HandleFunc("/html/post", htmlPostNoteHandler)
+	http.HandleFunc("/html/reply", htmlReplyHandler)
+	http.HandleFunc("/html/check-connection", htmlCheckConnectionHandler)
 	http.HandleFunc("/health", healthHandler)
+
+	// Start NIP-46 connection listener for nostrconnect:// flow
+	StartConnectionListener(defaultNostrConnectRelays)
 
 	log.Printf("Starting server on :%s", port)
 	log.Printf("Open http://localhost:%s in your browser (JS client)", port)

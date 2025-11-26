@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/hex"
 	"html/template"
 	"log"
@@ -10,14 +11,25 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/skip2/go-qrcode"
 )
 
 const sessionCookieName = "nostr_session"
 const sessionMaxAge = 24 * time.Hour
 
+// generateQRCodeDataURL creates a QR code as a base64 data URL
+func generateQRCodeDataURL(content string) string {
+	png, err := qrcode.Encode(content, qrcode.Medium, 256)
+	if err != nil {
+		log.Printf("Failed to generate QR code: %v", err)
+		return ""
+	}
+	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(png)
+}
+
 // htmlLoginHandler shows the login page (GET) or processes login (POST)
 func htmlLoginHandler(w http.ResponseWriter, r *http.Request) {
-	// Handle POST - delegate to submit handler
+	// Handle POST - delegate to submit handler (for bunker:// URLs)
 	if r.Method == http.MethodPost {
 		htmlLoginSubmitHandler(w, r)
 		return
@@ -30,12 +42,30 @@ func htmlLoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Generate nostrconnect:// URL for the user
+	nostrConnectURL, secret, err := GenerateNostrConnectURL(defaultNostrConnectRelays)
+	if err != nil {
+		log.Printf("Failed to generate nostrconnect URL: %v", err)
+	}
+
+	// Generate QR code
+	var qrCodeDataURL string
+	if nostrConnectURL != "" {
+		qrCodeDataURL = generateQRCodeDataURL(nostrConnectURL)
+	}
+
 	data := struct {
-		Title   string
-		Error   string
-		Success string
+		Title           string
+		Error           string
+		Success         string
+		NostrConnectURL string
+		Secret          string
+		QRCodeDataURL   template.URL
 	}{
-		Title: "Login with Nostr Connect",
+		Title:           "Login with Nostr Connect",
+		NostrConnectURL: nostrConnectURL,
+		Secret:          secret,
+		QRCodeDataURL:   template.URL(qrCodeDataURL),
 	}
 
 	// Check for error/success messages in query params
@@ -91,6 +121,37 @@ func htmlLoginSubmitHandler(w http.ResponseWriter, r *http.Request) {
 	})
 
 	log.Printf("User logged in: %s", hex.EncodeToString(session.UserPubKey))
+	http.Redirect(w, r, "/html/timeline?kinds=1&limit=20&success=Logged+in+successfully", http.StatusSeeOther)
+}
+
+// htmlCheckConnectionHandler checks if a nostrconnect session is ready
+func htmlCheckConnectionHandler(w http.ResponseWriter, r *http.Request) {
+	secret := r.URL.Query().Get("secret")
+	if secret == "" {
+		http.Redirect(w, r, "/html/login?error=Missing+connection+secret", http.StatusSeeOther)
+		return
+	}
+
+	session := CheckConnection(secret)
+	if session == nil {
+		// Not connected yet
+		http.Redirect(w, r, "/html/login?error=Connection+not+ready.+Make+sure+you+approved+in+your+signer+app,+then+try+again.&secret="+secret, http.StatusSeeOther)
+		return
+	}
+
+	// Connected! Store session and set cookie
+	bunkerSessions.Set(session)
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    session.ID,
+		Path:     "/",
+		MaxAge:   int(sessionMaxAge.Seconds()),
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+
+	log.Printf("User logged in via nostrconnect: %s", hex.EncodeToString(session.UserPubKey))
 	http.Redirect(w, r, "/html/timeline?kinds=1&limit=20&success=Logged+in+successfully", http.StatusSeeOther)
 }
 
@@ -163,6 +224,75 @@ func htmlPostNoteHandler(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Published note: %s", signedEvent.ID)
 	http.Redirect(w, r, "/html/timeline?kinds=1&limit=20&success=Note+published", http.StatusSeeOther)
+}
+
+// htmlReplyHandler handles replying to a note via POST form
+func htmlReplyHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Redirect(w, r, "/html/timeline?kinds=1&limit=20", http.StatusSeeOther)
+		return
+	}
+
+	session := getSessionFromRequest(r)
+	if session == nil || !session.Connected {
+		http.Redirect(w, r, "/html/login?error=Please+login+first", http.StatusSeeOther)
+		return
+	}
+
+	content := strings.TrimSpace(r.FormValue("content"))
+	replyTo := strings.TrimSpace(r.FormValue("reply_to"))
+	replyToPubkey := strings.TrimSpace(r.FormValue("reply_to_pubkey"))
+
+	if content == "" {
+		http.Redirect(w, r, "/html/thread/"+replyTo+"?error=Reply+content+is+required", http.StatusSeeOther)
+		return
+	}
+
+	if replyTo == "" {
+		http.Redirect(w, r, "/html/timeline?kinds=1&limit=20&error=Missing+reply+target", http.StatusSeeOther)
+		return
+	}
+
+	// Build tags for reply
+	// NIP-10: e tag with "reply" marker, p tag to mention the author
+	tags := [][]string{
+		{"e", replyTo, "", "reply"},
+	}
+	if replyToPubkey != "" {
+		tags = append(tags, []string{"p", replyToPubkey})
+	}
+
+	// Create unsigned event
+	event := UnsignedEvent{
+		Kind:      1,
+		Content:   content,
+		Tags:      tags,
+		CreatedAt: time.Now().Unix(),
+	}
+
+	// Sign via bunker
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	signedEvent, err := session.SignEvent(ctx, event)
+	if err != nil {
+		log.Printf("Failed to sign reply: %v", err)
+		http.Redirect(w, r, "/html/thread/"+replyTo+"?error="+escapeURLParam("Failed to sign: "+err.Error()), http.StatusSeeOther)
+		return
+	}
+
+	// Publish to relays
+	relays := []string{
+		"wss://relay.damus.io",
+		"wss://relay.nostr.band",
+		"wss://relay.primal.net",
+		"wss://nos.lol",
+	}
+
+	publishEvent(ctx, relays, signedEvent)
+
+	log.Printf("Published reply: %s (to %s)", signedEvent.ID, replyTo)
+	http.Redirect(w, r, "/html/thread/"+replyTo+"?success=Reply+published", http.StatusSeeOther)
 }
 
 // getSessionFromRequest retrieves the bunker session from the request cookie
@@ -384,7 +514,38 @@ var htmlLoginTemplate = `<!DOCTYPE html>
       <div class="alert alert-success">{{.Success}}</div>
       {{end}}
 
+      {{if .NostrConnectURL}}
+      <div class="login-form" style="margin-bottom: 24px;">
+        <h3 style="margin-bottom: 16px; color: #333;">Option 1: Scan with Signer App</h3>
+        {{if .QRCodeDataURL}}
+        <div style="text-align: center; margin-bottom: 16px;">
+          <img src="{{.QRCodeDataURL}}" alt="Scan this QR code with your signer app" style="max-width: 256px; border: 4px solid white; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+        </div>
+        <p style="font-size: 14px; color: #666; margin-bottom: 16px; text-align: center;">
+          Scan this QR code with your signer app (Amber, etc.)
+        </p>
+        {{end}}
+        <details style="margin-bottom: 16px;">
+          <summary style="cursor: pointer; font-size: 13px; color: #666;">Or copy URL manually</summary>
+          <div style="background: #e9ecef; padding: 12px; border-radius: 4px; font-family: monospace; font-size: 11px; word-break: break-all; margin-top: 8px;">
+            {{.NostrConnectURL}}
+          </div>
+        </details>
+        <a href="/html/check-connection?secret={{.Secret}}" class="submit-btn" style="display: block; text-align: center; text-decoration: none;">
+          Check Connection
+        </a>
+        <p class="form-help" style="margin-top: 12px;">
+          After approving in your signer app, click the button above to complete login.
+        </p>
+      </div>
+
+      <div style="text-align: center; color: #999; margin: 20px 0; font-size: 14px;">
+        &mdash; or &mdash;
+      </div>
+      {{end}}
+
       <form class="login-form" method="POST" action="/html/login">
+        <h3 style="margin-bottom: 16px; color: #333;">Option 2: Paste Bunker URL</h3>
         <div class="form-group">
           <label for="bunker_url">Bunker URL</label>
           <input type="text" id="bunker_url" name="bunker_url"

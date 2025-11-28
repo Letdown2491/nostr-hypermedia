@@ -277,14 +277,22 @@ var htmlTemplate = `<!DOCTYPE html>
       <a href="/html/login">Login</a>
       {{end}}
     </nav>
-		<div style="margin-bottom:16px;font-size:13px;color:#666;display:flex;align-items:center;gap:8px;">
+		<div style="padding:12px 15px;background:#f8f9fa;border-bottom:1px solid #dee2e6;display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+		{{if .LoggedIn}}
+		<div style="display:flex;gap:4px;">
+		<a href="?kinds=1&limit=20&feed=follows{{if not .ShowReactions}}&fast=1{{end}}" style="padding:6px 12px;border-radius:4px;text-decoration:none;font-size:13px;{{if eq .FeedMode "follows"}}background:#667eea;color:white;{{else}}background:#e9ecef;color:#495057;{{end}}">Follows</a>
+		<a href="?kinds=1&limit=20&feed=global{{if not .ShowReactions}}&fast=1{{end}}" style="padding:6px 12px;border-radius:4px;text-decoration:none;font-size:13px;{{if eq .FeedMode "global"}}background:#667eea;color:white;{{else}}background:#e9ecef;color:#495057;{{end}}">Global</a>
+		</div>
+		{{end}}
+		<div style="display:flex;align-items:center;gap:8px;font-size:13px;color:#666;">
 		<span>Reactions:</span>
-		<a href="{{if .ShowReactions}}?kinds=1&limit=20&fast=1{{else}}?kinds=1&limit=20{{end}}" style="text-decoration:none;display:inline-flex;align-items:center;">
+		<a href="?kinds=1&limit=20&feed={{.FeedMode}}{{if .ShowReactions}}&fast=1{{end}}" style="text-decoration:none;display:inline-flex;align-items:center;">
 		<span style="display:inline-block;width:36px;height:20px;background:{{if .ShowReactions}}#667eea{{else}}#ccc{{end}};border-radius:10px;position:relative;">
 		<span style="position:absolute;top:2px;{{if .ShowReactions}}right:2px{{else}}left:2px{{end}};width:16px;height:16px;background:white;border-radius:50%;"></span>
 		</span>
 		</a>
 		<span style="color:#999;font-size:12px;">{{if .ShowReactions}}(slower){{else}}(faster){{end}}</span>
+		</div>
 		</div>
 		{{if .ActiveRelays}}
 		<details style="margin-bottom:16px;font-size:12px;color:#666;">
@@ -439,6 +447,7 @@ type HTMLPageData struct {
 	Error         string
 	Success       string
 	ShowReactions bool     // Whether reactions are being fetched (slow mode)
+	FeedMode      string   // "follows" or "global"
 	ActiveRelays  []string // Relays being used for this request
 }
 
@@ -506,7 +515,7 @@ func processContentToHTML(content string) template.HTML {
 	return template.HTML(result)
 }
 
-func renderHTML(resp TimelineResponse, relays []string, authors []string, kinds []int, limit int, session *BunkerSession, errorMsg, successMsg string, showReactions bool) (string, error) {
+func renderHTML(resp TimelineResponse, relays []string, authors []string, kinds []int, limit int, session *BunkerSession, errorMsg, successMsg string, showReactions bool, feedMode string) (string, error) {
 	// Convert to HTML page data
 	items := make([]HTMLEventItem, len(resp.Items))
 	for i, item := range resp.Items {
@@ -556,6 +565,7 @@ func renderHTML(resp TimelineResponse, relays []string, authors []string, kinds 
 		Error:         errorMsg,
 		Success:       successMsg,
 		ShowReactions: showReactions,
+		FeedMode:      feedMode,
 		ActiveRelays:  relays,
 	}
 

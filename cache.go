@@ -259,3 +259,43 @@ func (c *EventCache) cleanup() {
 		}
 	}
 }
+
+// ContactCache stores contact lists with short TTL
+type ContactCache struct {
+	contacts sync.Map
+	ttl      time.Duration
+}
+
+type cachedContacts struct {
+	pubkeys   []string
+	fetchedAt time.Time
+}
+
+// Global contact cache - 2 minute TTL (contacts change often)
+var contactCache = &ContactCache{
+	ttl: 2 * time.Minute,
+}
+
+// Get retrieves contacts from cache if not expired
+func (c *ContactCache) Get(pubkey string) ([]string, bool) {
+	val, ok := c.contacts.Load(pubkey)
+	if !ok {
+		return nil, false
+	}
+
+	cached := val.(*cachedContacts)
+	if time.Since(cached.fetchedAt) > c.ttl {
+		c.contacts.Delete(pubkey)
+		return nil, false
+	}
+
+	return cached.pubkeys, true
+}
+
+// Set stores contacts in the cache
+func (c *ContactCache) Set(pubkey string, contacts []string) {
+	c.contacts.Store(pubkey, &cachedContacts{
+		pubkeys:   contacts,
+		fetchedAt: time.Now(),
+	})
+}

@@ -833,3 +833,29 @@ func fetchRelayList(pubkey string) *RelayList {
 	log.Printf("Found relay list for %s: %d read, %d write relays", pubkey[:12], len(relayList.Read), len(relayList.Write))
 	return relayList
 }
+
+// fetchContactList fetches a user's kind:3 contact list (who they follow)
+func fetchContactList(relays []string, pubkey string) []string {
+	filter := Filter{
+		Authors: []string{pubkey},
+		Kinds:   []int{3},
+		Limit:   1,
+	}
+
+	events, _ := fetchEventsFromRelaysWithTimeout(relays, filter, 3*time.Second)
+	if len(events) == 0 {
+		log.Printf("No contact list found for %s", pubkey[:12])
+		return nil
+	}
+
+	// Parse contacts from p tags
+	var contacts []string
+	for _, tag := range events[0].Tags {
+		if len(tag) >= 2 && tag[0] == "p" {
+			contacts = append(contacts, tag[1])
+		}
+	}
+
+	log.Printf("Found %d contacts for %s", len(contacts), pubkey[:12])
+	return contacts
+}

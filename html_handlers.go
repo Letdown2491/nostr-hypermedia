@@ -59,6 +59,39 @@ func htmlTimelineHandler(w http.ResponseWriter, r *http.Request) {
 	until := parseInt64(q.Get("until"))
 	fast := q.Get("fast") == "1" || q.Get("fast") == "true"
 
+	// Feed mode: "follows" or "global" (default to "follows" for logged-in users)
+	feedMode := q.Get("feed")
+	if feedMode == "" {
+		if session != nil && session.Connected {
+			feedMode = "follows"
+		} else {
+			feedMode = "global"
+		}
+	}
+
+	// If feed=follows and user is logged in, fetch their contact list
+	if feedMode == "follows" && session != nil && session.Connected && len(authors) == 0 {
+		pubkeyHex := hex.EncodeToString(session.UserPubKey)
+
+		// Check cache first
+		contacts, ok := contactCache.Get(pubkeyHex)
+		if !ok {
+			// Fetch from relays
+			log.Printf("Fetching contact list for %s...", pubkeyHex[:12])
+			contacts = fetchContactList(relays, pubkeyHex)
+			if contacts != nil {
+				contactCache.Set(pubkeyHex, contacts)
+			}
+		} else {
+			log.Printf("Contact cache hit for %s (%d contacts)", pubkeyHex[:12], len(contacts))
+		}
+
+		if len(contacts) > 0 {
+			authors = contacts
+			log.Printf("Filtering to %d followed authors", len(authors))
+		}
+	}
+
 	// Check if we should filter out replies (default to true like JSON handler)
 	noReplies := q.Get("no_replies") != "0"
 
@@ -167,10 +200,11 @@ func htmlTimelineHandler(w http.ResponseWriter, r *http.Request) {
 		lastCreatedAt := items[len(items)-1].CreatedAt
 		resp.Page.Until = &lastCreatedAt
 		nextURL := buildPaginationURL(r.URL.Path, relays, authors, kinds, limit, lastCreatedAt)
-		// Preserve fast mode in pagination
+		// Preserve fast mode and feed mode in pagination
 		if fast {
 			nextURL += "&fast=1"
 		}
+		nextURL += "&feed=" + feedMode
 		resp.Page.Next = &nextURL
 	}
 
@@ -179,7 +213,7 @@ func htmlTimelineHandler(w http.ResponseWriter, r *http.Request) {
 	successMsg := q.Get("success")
 
 	// Render HTML - showReactions is opposite of fast mode
-	html, err := renderHTML(resp, relays, authors, kinds, limit, session, errorMsg, successMsg, !fast)
+	html, err := renderHTML(resp, relays, authors, kinds, limit, session, errorMsg, successMsg, !fast, feedMode)
 	if err != nil {
 		log.Printf("Error rendering HTML: %v", err)
 		http.Error(w, "Error rendering page", http.StatusInternalServerError)

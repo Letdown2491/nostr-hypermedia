@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/hex"
 	"fmt"
 	"log"
 	"net/http"
@@ -14,14 +15,40 @@ func htmlTimelineHandler(w http.ResponseWriter, r *http.Request) {
 	// Parse query parameters (same as JSON handler)
 	q := r.URL.Query()
 
+	// Get session early to check for user's relay list
+	session := getSessionFromRequest(r)
+
 	relays := parseStringList(q.Get("relays"))
 	if len(relays) == 0 {
-		relays = []string{
-			"wss://relay.damus.io",
-			"wss://relay.nostr.band",
-			"wss://relay.primal.net",
-			"wss://nos.lol",
-			"wss://nostr.mom",
+		// Use user's write relays if logged in and have a relay list (NIP-65)
+		if session != nil && session.Connected {
+			// If relay list not fetched yet, try to fetch it now
+			if session.UserRelayList == nil && session.UserPubKey != nil {
+				pubkeyHex := hex.EncodeToString(session.UserPubKey)
+				log.Printf("Fetching relay list for user %s...", pubkeyHex[:12])
+				relayList := fetchRelayList(pubkeyHex)
+				if relayList != nil {
+					session.mu.Lock()
+					session.UserRelayList = relayList
+					session.mu.Unlock()
+				}
+			}
+
+			if session.UserRelayList != nil && len(session.UserRelayList.Write) > 0 {
+				relays = session.UserRelayList.Write
+				log.Printf("Using user's %d write relays from NIP-65", len(relays))
+			}
+		}
+
+		// Fallback to default relays
+		if len(relays) == 0 {
+			relays = []string{
+				"wss://relay.damus.io",
+				"wss://relay.nostr.band",
+				"wss://relay.primal.net",
+				"wss://nos.lol",
+				"wss://nostr.mom",
+			}
 		}
 	}
 
@@ -147,8 +174,7 @@ func htmlTimelineHandler(w http.ResponseWriter, r *http.Request) {
 		resp.Page.Next = &nextURL
 	}
 
-	// Get session and query params for messages
-	session := getSessionFromRequest(r)
+	// Get query params for messages (session already fetched at start)
 	errorMsg := q.Get("error")
 	successMsg := q.Get("success")
 

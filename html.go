@@ -286,6 +286,16 @@ var htmlTemplate = `<!DOCTYPE html>
 		</a>
 		<span style="color:#999;font-size:12px;">{{if .ShowReactions}}(slower){{else}}(faster){{end}}</span>
 		</div>
+		{{if .ActiveRelays}}
+		<details style="margin-bottom:16px;font-size:12px;color:#666;">
+		<summary style="cursor:pointer;user-select:none;">Using {{len .ActiveRelays}} relay{{if gt (len .ActiveRelays) 1}}s{{end}}</summary>
+		<ul style="margin:8px 0 0 20px;padding:0;list-style:disc;">
+		{{range .ActiveRelays}}
+		<li style="margin:2px 0;font-family:monospace;font-size:11px;color:#667eea;">{{.}}</li>
+		{{end}}
+		</ul>
+		</details>
+		{{end}}
 
     <main>
       {{if .Error}}
@@ -428,7 +438,8 @@ type HTMLPageData struct {
 	UserPubKey    string
 	Error         string
 	Success       string
-	ShowReactions bool // Whether reactions are being fetched (slow mode)
+	ShowReactions bool     // Whether reactions are being fetched (slow mode)
+	ActiveRelays  []string // Relays being used for this request
 }
 
 type HTMLEventItem struct {
@@ -545,6 +556,7 @@ func renderHTML(resp TimelineResponse, relays []string, authors []string, kinds 
 		Error:         errorMsg,
 		Success:       successMsg,
 		ShowReactions: showReactions,
+		ActiveRelays:  relays,
 	}
 
 	// Add session info if logged in

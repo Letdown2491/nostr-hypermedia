@@ -31,6 +31,7 @@ type BunkerSession struct {
 	ConversationKey   []byte    // Cached conversation key
 	Connected         bool
 	CreatedAt         time.Time
+	UserRelayList     *RelayList // User's NIP-65 relay list
 	mu                sync.Mutex
 }
 
@@ -173,6 +174,15 @@ func (s *BunkerSession) Connect(ctx context.Context) error {
 	s.Connected = true
 
 	log.Printf("NIP-46: Connected to bunker, user pubkey: %s", userPubKeyHex)
+
+	// Fetch user's NIP-65 relay list in background
+	go func() {
+		relayList := fetchRelayList(userPubKeyHex)
+		s.mu.Lock()
+		s.UserRelayList = relayList
+		s.mu.Unlock()
+	}()
+
 	return nil
 }
 

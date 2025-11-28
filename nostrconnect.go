@@ -46,6 +46,8 @@ type PendingConnection struct {
 	RemoteSignerPubKey []byte
 	UserPubKey         []byte
 	Connected          bool
+	UserRelayList      *RelayList // User's NIP-65 relay list
+	mu                 sync.Mutex
 }
 
 type PendingConnectionStore struct {
@@ -334,6 +336,15 @@ func fetchUserPubKey(pending *PendingConnection, remoteSignerPubKeyHex string) {
 
 		pending.UserPubKey = userPubKeyBytes
 		log.Printf("NIP-46: Got user pubkey: %s", userPubKey)
+
+		// Fetch user's NIP-65 relay list in background
+		go func(pubkeyHex string) {
+			relayList := fetchRelayList(pubkeyHex)
+			pending.mu.Lock()
+			pending.UserRelayList = relayList
+			pending.mu.Unlock()
+		}(userPubKey)
+
 		return
 	}
 }
@@ -428,6 +439,10 @@ func CheckConnection(secret string) *BunkerSession {
 	}
 
 	// Connection established! Create a proper BunkerSession
+	pending.mu.Lock()
+	userRelayList := pending.UserRelayList
+	pending.mu.Unlock()
+
 	session := &BunkerSession{
 		ID:                 generateSessionID(),
 		ClientPrivKey:      pending.ClientPrivKey,
@@ -438,6 +453,7 @@ func CheckConnection(secret string) *BunkerSession {
 		ConversationKey:    pending.ConversationKey,
 		Connected:          true,
 		CreatedAt:          time.Now(),
+		UserRelayList:      userRelayList,
 	}
 
 	// Clean up pending connection

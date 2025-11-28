@@ -773,3 +773,63 @@ collectLoop:
 
 	return replyCounts
 }
+
+// RelayList represents a user's NIP-65 relay list
+type RelayList struct {
+	Read  []string // Relays where user reads mentions
+	Write []string // Relays where user writes events
+}
+
+// fetchRelayList fetches a user's kind:10002 relay list metadata
+func fetchRelayList(pubkey string) *RelayList {
+	// Use well-known indexer relays to find relay lists
+	indexerRelays := []string{
+		"wss://purplepag.es",
+		"wss://relay.nostr.band",
+		"wss://relay.damus.io",
+	}
+
+	filter := Filter{
+		Authors: []string{pubkey},
+		Kinds:   []int{10002},
+		Limit:   1,
+	}
+
+	events, _ := fetchEventsFromRelaysWithTimeout(indexerRelays, filter, 2*time.Second)
+	if len(events) == 0 {
+		log.Printf("No relay list found for %s", pubkey[:12])
+		return nil
+	}
+
+	// Parse the relay list from tags
+	relayList := &RelayList{
+		Read:  []string{},
+		Write: []string{},
+	}
+
+	for _, tag := range events[0].Tags {
+		if len(tag) < 2 || tag[0] != "r" {
+			continue
+		}
+
+		relayURL := tag[1]
+		marker := ""
+		if len(tag) >= 3 {
+			marker = tag[2]
+		}
+
+		switch marker {
+		case "read":
+			relayList.Read = append(relayList.Read, relayURL)
+		case "write":
+			relayList.Write = append(relayList.Write, relayURL)
+		default:
+			// No marker means both read and write
+			relayList.Read = append(relayList.Read, relayURL)
+			relayList.Write = append(relayList.Write, relayURL)
+		}
+	}
+
+	log.Printf("Found relay list for %s: %d read, %d write relays", pubkey[:12], len(relayList.Read), len(relayList.Write))
+	return relayList
+}

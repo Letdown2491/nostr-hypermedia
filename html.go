@@ -277,13 +277,15 @@ var htmlTemplate = `<!DOCTYPE html>
       <a href="/html/login">Login</a>
       {{end}}
     </nav>
-    <div style="margin-bottom:16px;font-size:13px;color:#666;">
-      {{if .ShowReactions}}
-      <span>Reactions: On (slower)</span> · <a href="?kinds=1&limit=20&fast=1">Turn off</a>
-      {{else}}
-      <span>Reactions: Off</span> · <a href="?kinds=1&limit=20">Turn on (slower)</a>
-      {{end}}
-    </div>
+		<div style="margin-bottom:16px;font-size:13px;color:#666;display:flex;align-items:center;gap:8px;">
+		<span>Reactions:</span>
+		<a href="{{if .ShowReactions}}?kinds=1&limit=20&fast=1{{else}}?kinds=1&limit=20{{end}}" style="text-decoration:none;display:inline-flex;align-items:center;">
+		<span style="display:inline-block;width:36px;height:20px;background:{{if .ShowReactions}}#667eea{{else}}#ccc{{end}};border-radius:10px;position:relative;">
+		<span style="position:absolute;top:2px;{{if .ShowReactions}}right:2px{{else}}left:2px{{end}};width:16px;height:16px;background:white;border-radius:50%;"></span>
+		</span>
+		</a>
+		<span style="color:#999;font-size:12px;">{{if .ShowReactions}}(slower){{else}}(faster){{end}}</span>
+		</div>
 
     <main>
       {{if .Error}}
@@ -1183,6 +1185,12 @@ var htmlProfileTemplate = `<!DOCTYPE html>
       font-size: 13px;
       border-top: 1px solid #dee2e6;
     }
+		input:checked + span {
+			background-color: #2196F3;
+		}
+		input:checked + span + span {
+			transform: translateX(20px);
+		}
   </style>
 </head>
 <body>

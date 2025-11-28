@@ -1,6 +1,11 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -80,4 +85,177 @@ func (c *ProfileCache) GetMultiple(pubkeys []string) (found map[string]*ProfileI
 	}
 
 	return found, missing
+}
+
+// EventCache provides in-memory caching for relay queries
+type EventCache struct {
+	mu      sync.RWMutex
+	entries map[string]*EventCacheEntry
+	maxSize int
+}
+
+// EventCacheEntry holds cached events with expiration
+type EventCacheEntry struct {
+	Events    []Event
+	EOSE      bool
+	ExpiresAt time.Time
+}
+
+// Global event cache - max 500 cached queries
+var eventCache = NewEventCache(500)
+
+// NewEventCache creates a new cache with the given max size
+func NewEventCache(maxSize int) *EventCache {
+	cache := &EventCache{
+		entries: make(map[string]*EventCacheEntry),
+		maxSize: maxSize,
+	}
+	// Start background cleanup
+	go cache.cleanupLoop()
+	return cache
+}
+
+// buildCacheKey creates a deterministic key from query parameters
+func buildEventCacheKey(relays []string, filter Filter) string {
+	// Sort relays for consistent keys
+	sortedRelays := make([]string, len(relays))
+	copy(sortedRelays, relays)
+	sort.Strings(sortedRelays)
+
+	// Sort authors for consistent keys
+	sortedAuthors := make([]string, len(filter.Authors))
+	copy(sortedAuthors, filter.Authors)
+	sort.Strings(sortedAuthors)
+
+	// Sort kinds for consistent keys
+	sortedKinds := make([]int, len(filter.Kinds))
+	copy(sortedKinds, filter.Kinds)
+	sort.Ints(sortedKinds)
+
+	// Build key string
+	var sb strings.Builder
+	sb.WriteString("relays:")
+	sb.WriteString(strings.Join(sortedRelays, ","))
+	sb.WriteString("|authors:")
+	sb.WriteString(strings.Join(sortedAuthors, ","))
+	sb.WriteString("|kinds:")
+	for i, k := range sortedKinds {
+		if i > 0 {
+			sb.WriteString(",")
+		}
+		sb.WriteString(fmt.Sprintf("%d", k))
+	}
+	sb.WriteString(fmt.Sprintf("|limit:%d", filter.Limit))
+	if filter.Until != nil {
+		sb.WriteString(fmt.Sprintf("|until:%d", *filter.Until))
+	}
+
+	// Hash the key to keep it short
+	hash := sha256.Sum256([]byte(sb.String()))
+	return hex.EncodeToString(hash[:16])
+}
+
+// getEventTTL returns appropriate TTL based on query type
+func getEventTTL(filter Filter) time.Duration {
+	if len(filter.Authors) == 0 {
+		// Global timeline - cache longer, high hit rate
+		return 30 * time.Second
+	}
+	if len(filter.Authors) <= 5 {
+		// Small author list (maybe a profile page)
+		return 20 * time.Second
+	}
+	// Large author list (follow list) - shorter cache
+	return 15 * time.Second
+}
+
+// Get retrieves cached events if available and not expired
+func (c *EventCache) Get(relays []string, filter Filter) ([]Event, bool, bool) {
+	key := buildEventCacheKey(relays, filter)
+
+	c.mu.RLock()
+	entry, ok := c.entries[key]
+	c.mu.RUnlock()
+
+	if !ok || time.Now().After(entry.ExpiresAt) {
+		return nil, false, false
+	}
+
+	// Return a copy to avoid race conditions
+	events := make([]Event, len(entry.Events))
+	copy(events, entry.Events)
+	return events, entry.EOSE, true
+}
+
+// Set stores events in the cache
+func (c *EventCache) Set(relays []string, filter Filter, events []Event, eose bool) {
+	key := buildEventCacheKey(relays, filter)
+	ttl := getEventTTL(filter)
+
+	// Make a copy of events to store
+	eventsCopy := make([]Event, len(events))
+	copy(eventsCopy, events)
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Simple eviction if at max size: remove oldest entries
+	if len(c.entries) >= c.maxSize {
+		c.evictOldest()
+	}
+
+	c.entries[key] = &EventCacheEntry{
+		Events:    eventsCopy,
+		EOSE:      eose,
+		ExpiresAt: time.Now().Add(ttl),
+	}
+}
+
+// evictOldest removes the oldest 10% of entries (must hold write lock)
+func (c *EventCache) evictOldest() {
+	toRemove := c.maxSize / 10
+	if toRemove < 1 {
+		toRemove = 1
+	}
+
+	type keyExpiry struct {
+		key     string
+		expires time.Time
+	}
+
+	entries := make([]keyExpiry, 0, len(c.entries))
+	for k, v := range c.entries {
+		entries = append(entries, keyExpiry{k, v.ExpiresAt})
+	}
+
+	// Sort by expiration time (oldest first)
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].expires.Before(entries[j].expires)
+	})
+
+	// Remove oldest entries
+	for i := 0; i < toRemove && i < len(entries); i++ {
+		delete(c.entries, entries[i].key)
+	}
+}
+
+// cleanupLoop periodically removes expired entries
+func (c *EventCache) cleanupLoop() {
+	ticker := time.NewTicker(1 * time.Minute)
+	for range ticker.C {
+		c.cleanup()
+	}
+}
+
+// cleanup removes all expired entries
+func (c *EventCache) cleanup() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	now := time.Now()
+	for key, entry := range c.entries {
+		if now.After(entry.ExpiresAt) {
+			delete(c.entries, key)
+		}
+	}
 }

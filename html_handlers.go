@@ -44,8 +44,8 @@ func htmlTimelineHandler(w http.ResponseWriter, r *http.Request) {
 		Until:   until,
 	}
 
-	// Fetch events from relays
-	events, eose := fetchEventsFromRelays(relays, filter)
+	// Fetch events from relays (with caching)
+	events, eose := fetchEventsFromRelaysCached(relays, filter)
 
 	// Filter out replies (events with e tags) from main timeline
 	if noReplies {

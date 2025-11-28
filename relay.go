@@ -36,6 +36,24 @@ func fetchEventsFromRelays(relays []string, filter Filter) ([]Event, bool) {
 	return fetchEventsFromRelaysWithTimeout(relays, filter, 1500*time.Millisecond)
 }
 
+// fetchEventsFromRelaysCached checks cache first, then fetches from relays
+func fetchEventsFromRelaysCached(relays []string, filter Filter) ([]Event, bool) {
+	// Check cache first
+	if events, eose, ok := eventCache.Get(relays, filter); ok {
+		log.Printf("Cache hit for query (limit=%d, authors=%d)", filter.Limit, len(filter.Authors))
+		return events, eose
+	}
+
+	// Cache miss - fetch from relays
+	log.Printf("Cache miss for query (limit=%d, authors=%d)", filter.Limit, len(filter.Authors))
+	events, eose := fetchEventsFromRelays(relays, filter)
+
+	// Store in cache
+	eventCache.Set(relays, filter, events, eose)
+
+	return events, eose
+}
+
 func fetchEventsFromRelaysWithTimeout(relays []string, filter Filter, timeout time.Duration) ([]Event, bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()

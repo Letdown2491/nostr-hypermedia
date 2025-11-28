@@ -115,10 +115,10 @@ func timelineHandler(w http.ResponseWriter, r *http.Request) {
 	// Check if we should filter out replies
 	noReplies := q.Get("no_replies") != "0" // Default to filtering replies
 
-	// Fetch events from relays
+	// Fetch events from relays (with caching)
 	log.Printf("Fetching events: kinds=%v, authors=%v, limit=%d", kinds, authors, limit)
 	start := time.Now()
-	events, eose := fetchEventsFromRelays(relays, filter)
+	events, eose := fetchEventsFromRelaysCached(relays, filter)
 	log.Printf("Fetched %d events in %v (eose=%v)", len(events), time.Since(start), eose)
 
 	// Filter out replies (events with e tags) from main timeline

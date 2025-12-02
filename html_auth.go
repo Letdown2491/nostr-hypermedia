@@ -849,7 +849,6 @@ var htmlLoginTemplate = `<!DOCTYPE html>
 
     <nav>
       <a href="/html/timeline?kinds=1&limit=20&fast=1">Timeline</a>
-      <a href="/">JS Client</a>
     </nav>
 
     <main>

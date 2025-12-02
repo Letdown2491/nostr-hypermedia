@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"html"
 	"html/template"
+	"log"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -103,6 +105,99 @@ var htmlTemplate = `<!DOCTYPE html>
     }
     .note-content a:hover {
       text-decoration: underline;
+    }
+    .quoted-note {
+      background: #f8f9fa;
+      border: 1px solid #e1e4e8;
+      border-left: 3px solid #667eea;
+      border-radius: 4px;
+      padding: 12px;
+      margin: 12px 0;
+      font-size: 14px;
+    }
+    .quoted-note .quoted-author {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+      font-size: 13px;
+    }
+    .quoted-note .quoted-author img {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      margin: 0;
+    }
+    .quoted-note .quoted-author-name {
+      font-weight: 600;
+      color: #24292e;
+    }
+    .quoted-note .quoted-author-npub {
+      font-family: monospace;
+      font-size: 11px;
+      color: #667eea;
+    }
+    .quoted-note .quoted-content {
+      color: #24292e;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+    .quoted-note .quoted-meta {
+      font-size: 11px;
+      color: #666;
+      margin-top: 8px;
+    }
+    .quoted-note .quoted-meta a {
+      color: #667eea;
+    }
+    .quoted-note-error {
+      background: #fff5f5;
+      border: 1px solid #fecaca;
+      border-left: 3px solid #dc2626;
+      border-radius: 4px;
+      padding: 8px 12px;
+      margin: 8px 0;
+      font-size: 13px;
+      color: #666;
+    }
+    .nostr-ref {
+      display: inline-block;
+      padding: 4px 10px;
+      margin: 4px 0;
+      border-radius: 4px;
+      font-size: 13px;
+      text-decoration: none;
+      transition: background 0.2s;
+    }
+    .nostr-ref-event {
+      background: #e8f4fd;
+      border: 1px solid #b8daff;
+      color: #0056b3;
+    }
+    .nostr-ref-event:hover {
+      background: #d1e9fc;
+    }
+    .nostr-ref-profile {
+      display: inline;
+      padding: 0;
+      margin: 0;
+      border: none;
+      border-radius: 0;
+      background: none;
+      color: #2e7d32;
+      font-weight: 500;
+    }
+    .nostr-ref-profile:hover {
+      background: none;
+      text-decoration: underline;
+    }
+    .nostr-ref-addr {
+      background: #fff3e0;
+      border: 1px solid #ffcc80;
+      color: #e65100;
+    }
+    .nostr-ref-addr:hover {
+      background: #ffe0b2;
     }
     .note-author {
       display: flex;
@@ -497,6 +592,62 @@ type HTMLField struct {
 var imageExtRegex = regexp.MustCompile(`(?i)\.(jpg|jpeg|png|gif|webp)(\?.*)?$`)
 var urlRegex = regexp.MustCompile(`https?://[^\s<>"]+`)
 
+// Nostr reference regex - matches nostr:nevent1..., nostr:note1..., nostr:nprofile1..., nostr:naddr1..., nostr:npub1...
+var nostrRefRegex = regexp.MustCompile(`nostr:(nevent1[a-z0-9]+|note1[a-z0-9]+|nprofile1[a-z0-9]+|naddr1[a-z0-9]+|npub1[a-z0-9]+)`)
+
+// ResolvedRef holds a pre-resolved nostr reference
+type ResolvedRef struct {
+	HTML string
+}
+
+// extractNostrRefs extracts all nostr: identifiers from content strings
+func extractNostrRefs(contents []string) []string {
+	seen := make(map[string]bool)
+	var refs []string
+	for _, content := range contents {
+		matches := nostrRefRegex.FindAllStringSubmatch(content, -1)
+		for _, match := range matches {
+			if len(match) >= 2 {
+				identifier := match[1]
+				if !seen[identifier] {
+					seen[identifier] = true
+					refs = append(refs, identifier)
+				}
+			}
+		}
+	}
+	return refs
+}
+
+// batchResolveNostrRefs pre-fetches all nostr references in parallel
+// Returns a map of identifier -> rendered HTML
+func batchResolveNostrRefs(identifiers []string, relays []string) map[string]string {
+	if len(identifiers) == 0 || len(relays) == 0 {
+		return nil
+	}
+
+	resolved := make(map[string]string)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	log.Printf("Batch resolving %d nostr references...", len(identifiers))
+
+	for _, id := range identifiers {
+		wg.Add(1)
+		go func(identifier string) {
+			defer wg.Done()
+			html := resolveNostrReference(identifier, relays)
+			mu.Lock()
+			resolved[identifier] = html
+			mu.Unlock()
+		}(id)
+	}
+
+	wg.Wait()
+	log.Printf("Batch resolved %d nostr references", len(resolved))
+	return resolved
+}
+
 // formatNpubShort creates a shortened npub display like "npub1abc...xyz"
 func formatNpubShort(npub string) string {
 	if len(npub) <= 16 {
@@ -506,9 +657,60 @@ func formatNpubShort(npub string) string {
 }
 
 // processContentToHTML converts plain text content to HTML with images and links
+// This version does not resolve nostr: references (for backward compatibility)
 func processContentToHTML(content string) template.HTML {
-	// First escape the content
-	escaped := html.EscapeString(content)
+	return processContentToHTMLWithResolved(content, nil, nil)
+}
+
+// processContentToHTMLWithRelays converts plain text content to HTML with images, links,
+// and resolved nostr: references (quoted notes, profiles)
+// NOTE: This function resolves references synchronously - use processContentToHTMLWithResolved
+// with pre-resolved refs for better performance when processing multiple items
+func processContentToHTMLWithRelays(content string, relays []string) template.HTML {
+	return processContentToHTMLWithResolved(content, relays, nil)
+}
+
+// processContentToHTMLWithResolved converts plain text content to HTML with images, links,
+// and pre-resolved nostr: references. If resolvedRefs is provided, it uses those instead
+// of fetching from relays (much faster for batch processing).
+func processContentToHTMLWithResolved(content string, relays []string, resolvedRefs map[string]string) template.HTML {
+	// Use placeholders for nostr: references to avoid URL regex matching their HTML
+	type placeholder struct {
+		key   string
+		value string
+	}
+	var placeholders []placeholder
+	placeholderIndex := 0
+
+	// First, extract nostr: references and replace with placeholders (before escaping)
+	processedContent := nostrRefRegex.ReplaceAllStringFunc(content, func(match string) string {
+		identifier := strings.TrimPrefix(match, "nostr:")
+
+		var resolved string
+		if resolvedRefs != nil {
+			// Use pre-resolved HTML if available
+			if html, ok := resolvedRefs[identifier]; ok {
+				resolved = html
+			} else {
+				// Fallback to simple link if not pre-resolved
+				resolved = nostrRefToLink(identifier)
+			}
+		} else if relays != nil && len(relays) > 0 {
+			// Fetch synchronously (slow path - avoid in loops)
+			resolved = resolveNostrReference(identifier, relays)
+		} else {
+			// No relays, just render as link
+			resolved = nostrRefToLink(identifier)
+		}
+
+		key := fmt.Sprintf("\x00NOSTR_%d\x00", placeholderIndex)
+		placeholderIndex++
+		placeholders = append(placeholders, placeholder{key: key, value: resolved})
+		return key
+	})
+
+	// Now escape the content (placeholders will be escaped but that's fine - they're unique)
+	escaped := html.EscapeString(processedContent)
 
 	// Find all URLs and replace them
 	result := urlRegex.ReplaceAllStringFunc(escaped, func(url string) string {
@@ -520,10 +722,305 @@ func processContentToHTML(content string) template.HTML {
 		return fmt.Sprintf(`<a href="%s" target="_blank" rel="noopener">%s</a>`, html.EscapeString(url), html.EscapeString(url))
 	})
 
+	// Now replace placeholders with actual HTML (placeholders got escaped, so unescape them first)
+	for _, p := range placeholders {
+		escapedKey := html.EscapeString(p.key)
+		result = strings.Replace(result, escapedKey, p.value, 1)
+	}
+
 	return template.HTML(result)
 }
 
+// ExtractMentionedPubkeys extracts all pubkeys from npub/nprofile references in content
+func ExtractMentionedPubkeys(contents []string) []string {
+	seen := make(map[string]bool)
+	var pubkeys []string
+
+	for _, content := range contents {
+		matches := nostrRefRegex.FindAllStringSubmatch(content, -1)
+		for _, match := range matches {
+			if len(match) < 2 {
+				continue
+			}
+			identifier := match[1]
+
+			var pubkey string
+			if strings.HasPrefix(identifier, "npub1") {
+				pk, err := decodeBech32Pubkey(identifier)
+				if err == nil {
+					pubkey = pk
+				}
+			} else if strings.HasPrefix(identifier, "nprofile1") {
+				np, err := DecodeNProfile(identifier)
+				if err == nil {
+					pubkey = np.Pubkey
+				}
+			}
+
+			if pubkey != "" && !seen[pubkey] {
+				seen[pubkey] = true
+				pubkeys = append(pubkeys, pubkey)
+			}
+		}
+	}
+	return pubkeys
+}
+
+// getCachedUsername returns @username if profile is cached, otherwise @npubShort
+func getCachedUsername(pubkey string) string {
+	// Check profile cache first (no network fetch)
+	if profile, ok := profileCache.Get(pubkey); ok && profile != nil {
+		// Prefer display_name, then name
+		if profile.DisplayName != "" {
+			return "@" + profile.DisplayName
+		}
+		if profile.Name != "" {
+			return "@" + profile.Name
+		}
+	}
+	// Fall back to short npub
+	if npub, err := encodeBech32Pubkey(pubkey); err == nil {
+		return "@" + formatNpubShort(npub)
+	}
+	return "@" + pubkey[:12] + "..."
+}
+
+// nostrRefToLink converts a nostr identifier to a descriptive link
+func nostrRefToLink(identifier string) string {
+	switch {
+	case strings.HasPrefix(identifier, "nevent1"):
+		if ne, err := DecodeNEvent(identifier); err == nil {
+			return fmt.Sprintf(`<a href="/html/thread/%s" class="nostr-ref nostr-ref-event">View quoted note →</a>`,
+				html.EscapeString(ne.EventID))
+		}
+	case strings.HasPrefix(identifier, "note1"):
+		if eventID, err := DecodeNote(identifier); err == nil {
+			return fmt.Sprintf(`<a href="/html/thread/%s" class="nostr-ref nostr-ref-event">View quoted note →</a>`,
+				html.EscapeString(eventID))
+		}
+	case strings.HasPrefix(identifier, "nprofile1"):
+		if np, err := DecodeNProfile(identifier); err == nil {
+			username := getCachedUsername(np.Pubkey)
+			return fmt.Sprintf(`<a href="/html/profile/%s" class="nostr-ref nostr-ref-profile">%s</a>`,
+				html.EscapeString(np.Pubkey), html.EscapeString(username))
+		}
+	case strings.HasPrefix(identifier, "npub1"):
+		if pubkey, err := decodeBech32Pubkey(identifier); err == nil {
+			username := getCachedUsername(pubkey)
+			return fmt.Sprintf(`<a href="/html/profile/%s" class="nostr-ref nostr-ref-profile">%s</a>`,
+				html.EscapeString(pubkey), html.EscapeString(username))
+		}
+	case strings.HasPrefix(identifier, "naddr1"):
+		// naddr references replaceable events (often long-form articles)
+		if na, err := DecodeNAddr(identifier); err == nil {
+			// Determine content type based on kind
+			label := "View article →"
+			if na.Kind == 1 {
+				label = "View note →"
+			} else if na.Kind == 30023 {
+				label = "View article →"
+			} else if na.Kind == 30311 {
+				label = "View live event →"
+			}
+			// TODO: naddr needs special handling to fetch by kind:pubkey:d-tag
+			return fmt.Sprintf(`<a href="#" class="nostr-ref nostr-ref-addr" title="kind:%d">%s</a>`,
+				na.Kind, label)
+		}
+	}
+	// Fallback - return as-is
+	return "nostr:" + html.EscapeString(identifier)
+}
+
+// resolveNostrReference renders a nostr reference as a styled link
+// NOTE: Does NOT fetch events/profiles to keep rendering fast - just creates navigable links
+func resolveNostrReference(identifier string, relays []string) string {
+	// Use the fast link-only approach for all reference types
+	return nostrRefToLink(identifier)
+}
+
+// resolveNevent fetches and renders a nevent as a quoted note
+func resolveNevent(identifier string, relays []string) string {
+	ne, err := DecodeNEvent(identifier)
+	if err != nil {
+		return renderQuotedError(identifier, "Invalid nevent")
+	}
+
+	// Use relay hints if provided, otherwise use passed relays
+	fetchRelays := relays
+	if len(ne.RelayHints) > 0 {
+		fetchRelays = append(ne.RelayHints, relays...)
+	}
+
+	events := fetchEventByID(fetchRelays, ne.EventID)
+	if len(events) == 0 {
+		return renderQuotedError(identifier, "Event not found")
+	}
+
+	return renderQuotedNote(&events[0], relays)
+}
+
+// resolveNote fetches and renders a note1 as a quoted note
+func resolveNote(identifier string, relays []string) string {
+	eventID, err := DecodeNote(identifier)
+	if err != nil {
+		return renderQuotedError(identifier, "Invalid note")
+	}
+
+	events := fetchEventByID(relays, eventID)
+	if len(events) == 0 {
+		return renderQuotedError(identifier, "Event not found")
+	}
+
+	return renderQuotedNote(&events[0], relays)
+}
+
+// resolveNProfile renders an nprofile as a profile link
+func resolveNProfile(identifier string, relays []string) string {
+	np, err := DecodeNProfile(identifier)
+	if err != nil {
+		return nostrRefToLink(identifier)
+	}
+
+	// Fetch profile info
+	profiles := fetchProfiles(relays, []string{np.Pubkey})
+	profile := profiles[np.Pubkey]
+
+	npub, _ := encodeBech32Pubkey(np.Pubkey)
+	displayName := formatNpubShort(npub)
+	if profile != nil {
+		if profile.DisplayName != "" {
+			displayName = profile.DisplayName
+		} else if profile.Name != "" {
+			displayName = profile.Name
+		}
+	}
+
+	return fmt.Sprintf(`<a href="/html/profile/%s" class="nostr-ref">@%s</a>`,
+		html.EscapeString(np.Pubkey), html.EscapeString(displayName))
+}
+
+// resolveNpub renders an npub as a profile link
+func resolveNpub(identifier string, relays []string) string {
+	pubkey, err := decodeBech32Pubkey(identifier)
+	if err != nil {
+		return nostrRefToLink(identifier)
+	}
+
+	// Fetch profile info
+	profiles := fetchProfiles(relays, []string{pubkey})
+	profile := profiles[pubkey]
+
+	displayName := formatNpubShort(identifier)
+	if profile != nil {
+		if profile.DisplayName != "" {
+			displayName = profile.DisplayName
+		} else if profile.Name != "" {
+			displayName = profile.Name
+		}
+	}
+
+	return fmt.Sprintf(`<a href="/html/profile/%s" class="nostr-ref">@%s</a>`,
+		html.EscapeString(pubkey), html.EscapeString(displayName))
+}
+
+// resolveNAddr fetches and renders an naddr (replaceable event) as a quoted note
+func resolveNAddr(identifier string, relays []string) string {
+	na, err := DecodeNAddr(identifier)
+	if err != nil {
+		return renderQuotedError(identifier, "Invalid naddr")
+	}
+
+	// Use relay hints if provided
+	fetchRelays := relays
+	if len(na.RelayHints) > 0 {
+		fetchRelays = append(na.RelayHints, relays...)
+	}
+
+	// Fetch the replaceable event by kind:pubkey:d-tag
+	event := fetchReplaceableEvent(fetchRelays, int(na.Kind), na.Author, na.DTag)
+	if event == nil {
+		return renderQuotedError(identifier, "Event not found")
+	}
+
+	return renderQuotedNote(event, relays)
+}
+
+// fetchReplaceableEvent fetches a replaceable event by kind, author, and d-tag
+func fetchReplaceableEvent(relays []string, kind int, author string, dTag string) *Event {
+	filter := Filter{
+		Authors: []string{author},
+		Kinds:   []int{kind},
+		Limit:   1,
+	}
+
+	events, _ := fetchEventsFromRelays(relays, filter)
+
+	// Find the event with matching d-tag
+	for _, evt := range events {
+		for _, tag := range evt.Tags {
+			if len(tag) >= 2 && tag[0] == "d" && tag[1] == dTag {
+				return &evt
+			}
+		}
+		// For kind 0/3 (non-parameterized), d-tag may be empty
+		if dTag == "" {
+			return &evt
+		}
+	}
+
+	return nil
+}
+
+// renderQuotedNote renders an event as an embedded quoted note
+// NOTE: Does NOT fetch author profile to keep rendering fast - just shows npub
+func renderQuotedNote(event *Event, relays []string) string {
+	npub, _ := encodeBech32Pubkey(event.PubKey)
+	npubShort := formatNpubShort(npub)
+
+	// Build author section (no profile fetch - too slow for embedded quotes)
+	authorHTML := fmt.Sprintf(`<div class="quoted-author"><a href="/html/profile/%s"><span class="quoted-author-npub">%s</span></a></div>`,
+		html.EscapeString(event.PubKey),
+		html.EscapeString(npubShort))
+
+	// Truncate content if too long
+	content := event.Content
+	if len(content) > 500 {
+		content = content[:500] + "..."
+	}
+
+	// Process content but don't recurse into nested nostr: refs (pass nil relays)
+	contentHTML := processContentToHTMLWithRelays(content, nil)
+
+	// Format timestamp
+	timestamp := time.Unix(event.CreatedAt, 0).Format("2006-01-02 15:04")
+
+	return fmt.Sprintf(`<div class="quoted-note">%s<div class="quoted-content">%s</div><div class="quoted-meta"><span>%s</span> · <a href="/html/thread/%s">View thread →</a></div></div>`,
+		authorHTML,
+		contentHTML,
+		html.EscapeString(timestamp),
+		html.EscapeString(event.ID))
+}
+
+// renderQuotedError renders an error state for a failed nostr reference
+func renderQuotedError(identifier string, message string) string {
+	short := identifier
+	if len(short) > 20 {
+		short = short[:20] + "..."
+	}
+	return fmt.Sprintf(`<div class="quoted-note-error">%s: <code>%s</code></div>`,
+		html.EscapeString(message),
+		html.EscapeString(short))
+}
+
 func renderHTML(resp TimelineResponse, relays []string, authors []string, kinds []int, limit int, session *BunkerSession, errorMsg, successMsg string, showReactions bool, feedMode string, currentURL string) (string, error) {
+	// Pre-fetch all nostr: references in parallel for much faster rendering
+	contents := make([]string, len(resp.Items))
+	for i, item := range resp.Items {
+		contents[i] = item.Content
+	}
+	nostrRefs := extractNostrRefs(contents)
+	resolvedRefs := batchResolveNostrRefs(nostrRefs, relays)
+
 	// Convert to HTML page data
 	items := make([]HTMLEventItem, len(resp.Items))
 	for i, item := range resp.Items {
@@ -538,7 +1035,7 @@ func renderHTML(resp TimelineResponse, relays []string, authors []string, kinds 
 			NpubShort:     formatNpubShort(npub),
 			CreatedAt:     item.CreatedAt,
 			Content:       item.Content,
-			ContentHTML:   processContentToHTML(item.Content),
+			ContentHTML:   processContentToHTMLWithResolved(item.Content, relays, resolvedRefs),
 			RelaysSeen:    item.RelaysSeen,
 			Links:         []string{},
 			AuthorProfile: item.AuthorProfile,
@@ -728,6 +1225,99 @@ var htmlThreadTemplate = `<!DOCTYPE html>
     }
     .note-content a:hover {
       text-decoration: underline;
+    }
+    .quoted-note {
+      background: #f8f9fa;
+      border: 1px solid #e1e4e8;
+      border-left: 3px solid #667eea;
+      border-radius: 4px;
+      padding: 12px;
+      margin: 12px 0;
+      font-size: 14px;
+    }
+    .quoted-note .quoted-author {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+      font-size: 13px;
+    }
+    .quoted-note .quoted-author img {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      margin: 0;
+    }
+    .quoted-note .quoted-author-name {
+      font-weight: 600;
+      color: #24292e;
+    }
+    .quoted-note .quoted-author-npub {
+      font-family: monospace;
+      font-size: 11px;
+      color: #667eea;
+    }
+    .quoted-note .quoted-content {
+      color: #24292e;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+    .quoted-note .quoted-meta {
+      font-size: 11px;
+      color: #666;
+      margin-top: 8px;
+    }
+    .quoted-note .quoted-meta a {
+      color: #667eea;
+    }
+    .quoted-note-error {
+      background: #fff5f5;
+      border: 1px solid #fecaca;
+      border-left: 3px solid #dc2626;
+      border-radius: 4px;
+      padding: 8px 12px;
+      margin: 8px 0;
+      font-size: 13px;
+      color: #666;
+    }
+    .nostr-ref {
+      display: inline-block;
+      padding: 4px 10px;
+      margin: 4px 0;
+      border-radius: 4px;
+      font-size: 13px;
+      text-decoration: none;
+      transition: background 0.2s;
+    }
+    .nostr-ref-event {
+      background: #e8f4fd;
+      border: 1px solid #b8daff;
+      color: #0056b3;
+    }
+    .nostr-ref-event:hover {
+      background: #d1e9fc;
+    }
+    .nostr-ref-profile {
+      display: inline;
+      padding: 0;
+      margin: 0;
+      border: none;
+      border-radius: 0;
+      background: none;
+      color: #2e7d32;
+      font-weight: 500;
+    }
+    .nostr-ref-profile:hover {
+      background: none;
+      text-decoration: underline;
+    }
+    .nostr-ref-addr {
+      background: #fff3e0;
+      border: 1px solid #ffcc80;
+      color: #e65100;
+    }
+    .nostr-ref-addr:hover {
+      background: #ffe0b2;
     }
     .note-author {
       display: flex;
@@ -981,7 +1571,16 @@ func extractParentID(tags [][]string) string {
 	return parentID
 }
 
-func renderThreadHTML(resp ThreadResponse, session *BunkerSession, currentURL string) (string, error) {
+func renderThreadHTML(resp ThreadResponse, relays []string, session *BunkerSession, currentURL string) (string, error) {
+	// Pre-fetch all nostr: references in parallel for much faster rendering
+	contents := make([]string, 1+len(resp.Replies))
+	contents[0] = resp.Root.Content
+	for i, item := range resp.Replies {
+		contents[i+1] = item.Content
+	}
+	nostrRefs := extractNostrRefs(contents)
+	resolvedRefs := batchResolveNostrRefs(nostrRefs, relays)
+
 	// Generate npub for root author
 	rootNpub, _ := encodeBech32Pubkey(resp.Root.Pubkey)
 
@@ -994,7 +1593,7 @@ func renderThreadHTML(resp ThreadResponse, session *BunkerSession, currentURL st
 		NpubShort:     formatNpubShort(rootNpub),
 		CreatedAt:     resp.Root.CreatedAt,
 		Content:       resp.Root.Content,
-		ContentHTML:   processContentToHTML(resp.Root.Content),
+		ContentHTML:   processContentToHTMLWithResolved(resp.Root.Content, relays, resolvedRefs),
 		RelaysSeen:    resp.Root.RelaysSeen,
 		AuthorProfile: resp.Root.AuthorProfile,
 		ReplyCount:    resp.Root.ReplyCount,
@@ -1013,7 +1612,7 @@ func renderThreadHTML(resp ThreadResponse, session *BunkerSession, currentURL st
 			NpubShort:     formatNpubShort(npub),
 			CreatedAt:     item.CreatedAt,
 			Content:       item.Content,
-			ContentHTML:   processContentToHTML(item.Content),
+			ContentHTML:   processContentToHTMLWithResolved(item.Content, relays, resolvedRefs),
 			RelaysSeen:    item.RelaysSeen,
 			AuthorProfile: item.AuthorProfile,
 			ReplyCount:    item.ReplyCount,
@@ -1197,6 +1796,99 @@ var htmlProfileTemplate = `<!DOCTYPE html>
     .note-content a:hover {
       text-decoration: underline;
     }
+    .quoted-note {
+      background: #f8f9fa;
+      border: 1px solid #e1e4e8;
+      border-left: 3px solid #667eea;
+      border-radius: 4px;
+      padding: 12px;
+      margin: 12px 0;
+      font-size: 14px;
+    }
+    .quoted-note .quoted-author {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+      font-size: 13px;
+    }
+    .quoted-note .quoted-author img {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      margin: 0;
+    }
+    .quoted-note .quoted-author-name {
+      font-weight: 600;
+      color: #24292e;
+    }
+    .quoted-note .quoted-author-npub {
+      font-family: monospace;
+      font-size: 11px;
+      color: #667eea;
+    }
+    .quoted-note .quoted-content {
+      color: #24292e;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+    .quoted-note .quoted-meta {
+      font-size: 11px;
+      color: #666;
+      margin-top: 8px;
+    }
+    .quoted-note .quoted-meta a {
+      color: #667eea;
+    }
+    .quoted-note-error {
+      background: #fff5f5;
+      border: 1px solid #fecaca;
+      border-left: 3px solid #dc2626;
+      border-radius: 4px;
+      padding: 8px 12px;
+      margin: 8px 0;
+      font-size: 13px;
+      color: #666;
+    }
+    .nostr-ref {
+      display: inline-block;
+      padding: 4px 10px;
+      margin: 4px 0;
+      border-radius: 4px;
+      font-size: 13px;
+      text-decoration: none;
+      transition: background 0.2s;
+    }
+    .nostr-ref-event {
+      background: #e8f4fd;
+      border: 1px solid #b8daff;
+      color: #0056b3;
+    }
+    .nostr-ref-event:hover {
+      background: #d1e9fc;
+    }
+    .nostr-ref-profile {
+      display: inline;
+      padding: 0;
+      margin: 0;
+      border: none;
+      border-radius: 0;
+      background: none;
+      color: #2e7d32;
+      font-weight: 500;
+    }
+    .nostr-ref-profile:hover {
+      background: none;
+      text-decoration: underline;
+    }
+    .nostr-ref-addr {
+      background: #fff3e0;
+      border: 1px solid #ffcc80;
+      color: #e65100;
+    }
+    .nostr-ref-addr:hover {
+      background: #ffe0b2;
+    }
     .note-meta {
       display: flex;
       gap: 16px;
@@ -1327,6 +2019,14 @@ type HTMLProfileData struct {
 }
 
 func renderProfileHTML(resp ProfileResponse, relays []string, limit int) (string, error) {
+	// Pre-fetch all nostr: references in parallel for much faster rendering
+	contents := make([]string, len(resp.Notes.Items))
+	for i, item := range resp.Notes.Items {
+		contents[i] = item.Content
+	}
+	nostrRefs := extractNostrRefs(contents)
+	resolvedRefs := batchResolveNostrRefs(nostrRefs, relays)
+
 	// Generate npub from hex pubkey
 	npub, _ := encodeBech32Pubkey(resp.Pubkey)
 
@@ -1339,7 +2039,7 @@ func renderProfileHTML(resp ProfileResponse, relays []string, limit int) (string
 			Pubkey:        item.Pubkey,
 			CreatedAt:     item.CreatedAt,
 			Content:       item.Content,
-			ContentHTML:   processContentToHTML(item.Content),
+			ContentHTML:   processContentToHTMLWithResolved(item.Content, relays, resolvedRefs),
 			RelaysSeen:    item.RelaysSeen,
 			AuthorProfile: item.AuthorProfile,
 		}

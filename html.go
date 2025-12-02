@@ -99,12 +99,88 @@ var htmlTemplate = `<!DOCTYPE html>
       margin: 8px 0;
       display: block;
     }
+    .note-video {
+      max-width: 100%;
+      border-radius: 8px;
+      margin: 8px 0;
+      display: block;
+    }
+    .note-audio {
+      width: 100%;
+      margin: 8px 0;
+      display: block;
+    }
+    .youtube-embed {
+      width: 100%;
+      aspect-ratio: 16/9;
+      border-radius: 8px;
+      margin: 8px 0;
+      display: block;
+    }
     .note-content a {
       color: #667eea;
       text-decoration: none;
     }
     .note-content a:hover {
       text-decoration: underline;
+    }
+    .link-preview {
+      display: flex;
+      border: 1px solid #e1e4e8;
+      border-radius: 8px;
+      margin: 12px 0;
+      overflow: hidden;
+      text-decoration: none;
+      color: inherit;
+      background: #fafbfc;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .link-preview:hover {
+      border-color: #667eea;
+      box-shadow: 0 2px 8px rgba(102, 126, 234, 0.15);
+      text-decoration: none;
+    }
+    .link-preview-image {
+      width: 120px;
+      min-width: 120px;
+      height: 90px;
+      object-fit: cover;
+      margin: 0;
+      border-radius: 0;
+    }
+    .link-preview-content {
+      padding: 10px 14px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+    .link-preview-site {
+      font-size: 11px;
+      color: #6a737d;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 2px;
+    }
+    .link-preview-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #24292e;
+      line-height: 1.3;
+      margin-bottom: 4px;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .link-preview-desc {
+      font-size: 12px;
+      color: #586069;
+      line-height: 1.4;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
     }
     .quoted-note {
       background: #f8f9fa;
@@ -244,7 +320,7 @@ var htmlTemplate = `<!DOCTYPE html>
       font-size: 13px;
       color: #555;
     }
-    .reaction-badge:first-child {
+    .reply-count-badge {
       background: #e7eaff;
       color: #667eea;
     }
@@ -347,6 +423,24 @@ var htmlTemplate = `<!DOCTYPE html>
     button[type="submit"]:hover {
       background: #218838;
     }
+    button[type="submit"].reaction-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 10px;
+      background: #f0f0f0;
+      color: #555;
+      border: none;
+      border-radius: 16px;
+      font-size: 13px;
+      line-height: 1.4;
+      cursor: pointer;
+      font-family: inherit;
+      margin-top: 0;
+    }
+    button[type="submit"].reaction-badge:hover {
+      background: #e0e0e0;
+    }
     footer {
       text-align: center;
       padding: 20px;
@@ -411,7 +505,7 @@ var htmlTemplate = `<!DOCTYPE html>
       {{if .LoggedIn}}
       <form method="POST" action="/html/post" style="background:#f8f9fa;padding:16px;border-radius:8px;border:1px solid #dee2e6;margin-bottom:20px;">
         <div style="margin-bottom:10px;font-size:13px;color:#666;">
-          Posting as: <span style="font-family:monospace;color:#667eea;">{{slice .UserPubKey 0 12}}...</span>
+          Posting as: <span style="color:#2e7d32;font-weight:500;">{{.UserDisplayName}}</span>
         </div>
         <textarea name="content" placeholder="What's on your mind?" required
                   style="width:100%;padding:12px;border:1px solid #ced4da;border-radius:4px;font-size:14px;font-family:inherit;min-height:80px;resize:vertical;margin-bottom:10px;"></textarea>
@@ -438,6 +532,7 @@ var htmlTemplate = `<!DOCTYPE html>
       {{end}}
 
       {{range .Items}}
+      {{$item := .}}
       <article class="note">
         <div class="note-author">
           <a href="/html/profile/{{.Pubkey}}" style="text-decoration:none;">
@@ -462,21 +557,35 @@ var htmlTemplate = `<!DOCTYPE html>
         <div class="note-content">{{.ContentHTML}}</div>
         <div class="note-reactions">
           {{if gt .ReplyCount 0}}
-          <a href="/html/thread/{{.ID}}" class="reaction-badge" style="text-decoration:none;">replies {{.ReplyCount}}</a>
+          <a href="/html/thread/{{.ID}}" class="reaction-badge reply-count-badge" style="text-decoration:none;">replies {{.ReplyCount}}</a>
+          {{end}}
+          {{if and .Reactions (index .Reactions.ByType "❤️")}}
+          {{if $.LoggedIn}}
+          <form method="POST" action="/html/react" style="display:inline;margin:0;">
+            <input type="hidden" name="event_id" value="{{$item.ID}}">
+            <input type="hidden" name="event_pubkey" value="{{$item.Pubkey}}">
+            <input type="hidden" name="return_url" value="{{$.CurrentURL}}">
+            <input type="hidden" name="reaction" value="❤️">
+            <button type="submit" class="reaction-badge">❤️ {{index .Reactions.ByType "❤️"}} +</button>
+          </form>
+          {{else}}
+          <span class="reaction-badge">❤️ {{index .Reactions.ByType "❤️"}}</span>
+          {{end}}
+          {{else if $.LoggedIn}}
+          <form method="POST" action="/html/react" style="display:inline;margin:0;">
+            <input type="hidden" name="event_id" value="{{$item.ID}}">
+            <input type="hidden" name="event_pubkey" value="{{$item.Pubkey}}">
+            <input type="hidden" name="return_url" value="{{$.CurrentURL}}">
+            <input type="hidden" name="reaction" value="❤️">
+            <button type="submit" class="reaction-badge">❤️ +</button>
+          </form>
           {{end}}
           {{if and .Reactions (gt .Reactions.Total 0)}}
           {{range $type, $count := .Reactions.ByType}}
+          {{if ne $type "❤️"}}
           <span class="reaction-badge">{{$type}} {{$count}}</span>
           {{end}}
           {{end}}
-          {{if $.LoggedIn}}
-          <form method="POST" action="/html/react" style="display:inline;margin:0;">
-            <input type="hidden" name="event_id" value="{{.ID}}">
-            <input type="hidden" name="event_pubkey" value="{{.Pubkey}}">
-            <input type="hidden" name="return_url" value="{{$.CurrentURL}}">
-            <input type="hidden" name="reaction" value="+">
-            <button type="submit" style="background:#f0f0f0;border:none;border-radius:16px;padding:4px 10px;font-size:13px;cursor:pointer;color:#555;">+</button>
-          </form>
           {{end}}
         </div>
         <div class="note-meta">
@@ -538,20 +647,21 @@ var htmlTemplate = `<!DOCTYPE html>
 `
 
 type HTMLPageData struct {
-	Title         string
-	Meta          *MetaInfo
-	Items         []HTMLEventItem
-	Pagination    *HTMLPagination
-	Actions       []HTMLAction
-	Links         []string
-	LoggedIn      bool
-	UserPubKey    string
-	Error         string
-	Success       string
-	ShowReactions bool     // Whether reactions are being fetched (slow mode)
-	FeedMode      string   // "follows" or "global"
-	ActiveRelays  []string // Relays being used for this request
-	CurrentURL    string   // Current page URL for reaction redirects
+	Title           string
+	Meta            *MetaInfo
+	Items           []HTMLEventItem
+	Pagination      *HTMLPagination
+	Actions         []HTMLAction
+	Links           []string
+	LoggedIn        bool
+	UserPubKey      string
+	UserDisplayName string // Display name from profile (falls back to @npubShort)
+	Error           string
+	Success         string
+	ShowReactions   bool     // Whether reactions are being fetched (slow mode)
+	FeedMode        string   // "follows" or "global"
+	ActiveRelays    []string // Relays being used for this request
+	CurrentURL      string   // Current page URL for reaction redirects
 }
 
 type HTMLEventItem struct {
@@ -590,6 +700,12 @@ type HTMLField struct {
 
 // Image extension regex
 var imageExtRegex = regexp.MustCompile(`(?i)\.(jpg|jpeg|png|gif|webp)(\?.*)?$`)
+// Video extension regex
+var videoExtRegex = regexp.MustCompile(`(?i)\.(mp4|webm|mov|m4v)(\?.*)?$`)
+// Audio extension regex
+var audioExtRegex = regexp.MustCompile(`(?i)\.(mp3|wav|ogg|flac|m4a|aac)(\?.*)?$`)
+// YouTube URL regex - matches youtube.com/watch?v=ID, youtu.be/ID, youtube.com/shorts/ID
+var youtubeRegex = regexp.MustCompile(`(?i)(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/shorts/)([a-zA-Z0-9_-]{11})`)
 var urlRegex = regexp.MustCompile(`https?://[^\s<>"]+`)
 
 // Nostr reference regex - matches nostr:nevent1..., nostr:note1..., nostr:nprofile1..., nostr:naddr1..., nostr:npub1...
@@ -659,21 +775,27 @@ func formatNpubShort(npub string) string {
 // processContentToHTML converts plain text content to HTML with images and links
 // This version does not resolve nostr: references (for backward compatibility)
 func processContentToHTML(content string) template.HTML {
-	return processContentToHTMLWithResolved(content, nil, nil)
+	return processContentToHTMLFull(content, nil, nil, nil)
 }
 
 // processContentToHTMLWithRelays converts plain text content to HTML with images, links,
 // and resolved nostr: references (quoted notes, profiles)
-// NOTE: This function resolves references synchronously - use processContentToHTMLWithResolved
+// NOTE: This function resolves references synchronously - use processContentToHTMLFull
 // with pre-resolved refs for better performance when processing multiple items
 func processContentToHTMLWithRelays(content string, relays []string) template.HTML {
-	return processContentToHTMLWithResolved(content, relays, nil)
+	return processContentToHTMLFull(content, relays, nil, nil)
 }
 
 // processContentToHTMLWithResolved converts plain text content to HTML with images, links,
 // and pre-resolved nostr: references. If resolvedRefs is provided, it uses those instead
 // of fetching from relays (much faster for batch processing).
 func processContentToHTMLWithResolved(content string, relays []string, resolvedRefs map[string]string) template.HTML {
+	return processContentToHTMLFull(content, relays, resolvedRefs, nil)
+}
+
+// processContentToHTMLFull converts plain text content to HTML with images, links,
+// pre-resolved nostr: references, and link previews.
+func processContentToHTMLFull(content string, relays []string, resolvedRefs map[string]string, linkPreviews map[string]*LinkPreview) template.HTML {
 	// Use placeholders for nostr: references to avoid URL regex matching their HTML
 	type placeholder struct {
 		key   string
@@ -719,6 +841,22 @@ func processContentToHTMLWithResolved(content string, relays []string, resolvedR
 		if imageExtRegex.MatchString(url) {
 			return fmt.Sprintf(`<img src="%s" alt="image" loading="lazy">`, html.EscapeString(url))
 		}
+		if videoExtRegex.MatchString(url) {
+			return fmt.Sprintf(`<video src="%s" controls preload="metadata" class="note-video"></video>`, html.EscapeString(url))
+		}
+		if audioExtRegex.MatchString(url) {
+			return fmt.Sprintf(`<audio src="%s" controls preload="metadata" class="note-audio"></audio>`, html.EscapeString(url))
+		}
+		if match := youtubeRegex.FindStringSubmatch(url); len(match) > 1 {
+			videoID := match[1]
+			return fmt.Sprintf(`<iframe class="youtube-embed" src="https://www.youtube-nocookie.com/embed/%s" frameborder="0" allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>`, html.EscapeString(videoID))
+		}
+		// Check for link preview
+		if linkPreviews != nil {
+			if preview, ok := linkPreviews[url]; ok && !preview.Failed && preview.Title != "" {
+				return renderLinkPreview(url, preview)
+			}
+		}
 		return fmt.Sprintf(`<a href="%s" target="_blank" rel="noopener">%s</a>`, html.EscapeString(url), html.EscapeString(url))
 	})
 
@@ -729,6 +867,51 @@ func processContentToHTMLWithResolved(content string, relays []string, resolvedR
 	}
 
 	return template.HTML(result)
+}
+
+// renderLinkPreview creates an HTML preview card for a URL
+func renderLinkPreview(url string, preview *LinkPreview) string {
+	var sb strings.Builder
+
+	sb.WriteString(`<a href="`)
+	sb.WriteString(html.EscapeString(url))
+	sb.WriteString(`" target="_blank" rel="noopener" class="link-preview">`)
+
+	// Image on the left (if available)
+	if preview.Image != "" {
+		sb.WriteString(`<img src="`)
+		sb.WriteString(html.EscapeString(preview.Image))
+		sb.WriteString(`" alt="" class="link-preview-image" loading="lazy">`)
+	}
+
+	sb.WriteString(`<div class="link-preview-content">`)
+
+	// Site name
+	if preview.SiteName != "" {
+		sb.WriteString(`<div class="link-preview-site">`)
+		sb.WriteString(html.EscapeString(preview.SiteName))
+		sb.WriteString(`</div>`)
+	}
+
+	// Title
+	sb.WriteString(`<div class="link-preview-title">`)
+	sb.WriteString(html.EscapeString(preview.Title))
+	sb.WriteString(`</div>`)
+
+	// Description (truncate if too long)
+	if preview.Description != "" {
+		desc := preview.Description
+		if len(desc) > 150 {
+			desc = desc[:147] + "..."
+		}
+		sb.WriteString(`<div class="link-preview-desc">`)
+		sb.WriteString(html.EscapeString(desc))
+		sb.WriteString(`</div>`)
+	}
+
+	sb.WriteString(`</div></a>`)
+
+	return sb.String()
 }
 
 // ExtractMentionedPubkeys extracts all pubkeys from npub/nprofile references in content
@@ -1021,6 +1204,13 @@ func renderHTML(resp TimelineResponse, relays []string, authors []string, kinds 
 	nostrRefs := extractNostrRefs(contents)
 	resolvedRefs := batchResolveNostrRefs(nostrRefs, relays)
 
+	// Pre-fetch link previews for all URLs
+	var allURLs []string
+	for _, content := range contents {
+		allURLs = append(allURLs, ExtractPreviewableURLs(content)...)
+	}
+	linkPreviews := FetchLinkPreviews(allURLs)
+
 	// Convert to HTML page data
 	items := make([]HTMLEventItem, len(resp.Items))
 	for i, item := range resp.Items {
@@ -1035,7 +1225,7 @@ func renderHTML(resp TimelineResponse, relays []string, authors []string, kinds 
 			NpubShort:     formatNpubShort(npub),
 			CreatedAt:     item.CreatedAt,
 			Content:       item.Content,
-			ContentHTML:   processContentToHTMLWithResolved(item.Content, relays, resolvedRefs),
+			ContentHTML:   processContentToHTMLFull(item.Content, relays, resolvedRefs, linkPreviews),
 			RelaysSeen:    item.RelaysSeen,
 			Links:         []string{},
 			AuthorProfile: item.AuthorProfile,
@@ -1078,7 +1268,9 @@ func renderHTML(resp TimelineResponse, relays []string, authors []string, kinds 
 	// Add session info if logged in
 	if session != nil && session.Connected {
 		data.LoggedIn = true
-		data.UserPubKey = hex.EncodeToString(session.UserPubKey)
+		pubkeyHex := hex.EncodeToString(session.UserPubKey)
+		data.UserPubKey = pubkeyHex
+		data.UserDisplayName = getUserDisplayName(pubkeyHex)
 	}
 
 	// Template functions
@@ -1219,12 +1411,88 @@ var htmlThreadTemplate = `<!DOCTYPE html>
       margin: 8px 0;
       display: block;
     }
+    .note-video {
+      max-width: 100%;
+      border-radius: 8px;
+      margin: 8px 0;
+      display: block;
+    }
+    .note-audio {
+      width: 100%;
+      margin: 8px 0;
+      display: block;
+    }
+    .youtube-embed {
+      width: 100%;
+      aspect-ratio: 16/9;
+      border-radius: 8px;
+      margin: 8px 0;
+      display: block;
+    }
     .note-content a {
       color: #667eea;
       text-decoration: none;
     }
     .note-content a:hover {
       text-decoration: underline;
+    }
+    .link-preview {
+      display: flex;
+      border: 1px solid #e1e4e8;
+      border-radius: 8px;
+      margin: 12px 0;
+      overflow: hidden;
+      text-decoration: none;
+      color: inherit;
+      background: #fafbfc;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .link-preview:hover {
+      border-color: #667eea;
+      box-shadow: 0 2px 8px rgba(102, 126, 234, 0.15);
+      text-decoration: none;
+    }
+    .link-preview-image {
+      width: 120px;
+      min-width: 120px;
+      height: 90px;
+      object-fit: cover;
+      margin: 0;
+      border-radius: 0;
+    }
+    .link-preview-content {
+      padding: 10px 14px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+    .link-preview-site {
+      font-size: 11px;
+      color: #6a737d;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 2px;
+    }
+    .link-preview-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #24292e;
+      line-height: 1.3;
+      margin-bottom: 4px;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .link-preview-desc {
+      font-size: 12px;
+      color: #586069;
+      line-height: 1.4;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
     }
     .quoted-note {
       background: #f8f9fa;
@@ -1437,17 +1705,37 @@ var htmlThreadTemplate = `<!DOCTYPE html>
           </div>
         </div>
         <div class="note-content">{{.Root.ContentHTML}}</div>
-        {{if .LoggedIn}}
-        <div style="margin:12px 0;padding:8px 0;border-top:1px solid #e1e4e8;">
+        <div class="note-reactions" style="margin:12px 0;padding:8px 0;border-top:1px solid #e1e4e8;">
+          {{if and .Root.Reactions (index .Root.Reactions.ByType "❤️")}}
+          {{if $.LoggedIn}}
           <form method="POST" action="/html/react" style="display:inline;margin:0;">
             <input type="hidden" name="event_id" value="{{.Root.ID}}">
             <input type="hidden" name="event_pubkey" value="{{.Root.Pubkey}}">
             <input type="hidden" name="return_url" value="{{$.CurrentURL}}">
-            <input type="hidden" name="reaction" value="+">
-            <button type="submit" style="background:#f0f0f0;border:none;border-radius:16px;padding:4px 10px;font-size:13px;cursor:pointer;color:#555;">+</button>
+            <input type="hidden" name="reaction" value="❤️">
+            <button type="submit" class="reaction-badge">❤️ {{index .Root.Reactions.ByType "❤️"}} +</button>
           </form>
+          {{else}}
+          <span class="reaction-badge">❤️ {{index .Root.Reactions.ByType "❤️"}}</span>
+          {{end}}
+          {{else if $.LoggedIn}}
+          <form method="POST" action="/html/react" style="display:inline;margin:0;">
+            <input type="hidden" name="event_id" value="{{.Root.ID}}">
+            <input type="hidden" name="event_pubkey" value="{{.Root.Pubkey}}">
+            <input type="hidden" name="return_url" value="{{$.CurrentURL}}">
+            <input type="hidden" name="reaction" value="❤️">
+            <button type="submit" class="reaction-badge">❤️ +</button>
+          </form>
+          {{end}}
+          {{if and .Root.Reactions (gt .Root.Reactions.Total 0)}}
+          {{range $type, $count := .Root.Reactions.ByType}}
+          {{if ne $type "❤️"}}
+          <span class="reaction-badge">{{$type}} {{$count}}</span>
+          {{end}}
+          {{end}}
+          {{end}}
         </div>
-        {{end}}
+        {{if false}}{{end}}
         <div class="note-meta">
           <span>{{formatTime .Root.CreatedAt}}</span>
           {{if .Root.RelaysSeen}}
@@ -1467,7 +1755,7 @@ var htmlThreadTemplate = `<!DOCTYPE html>
         <input type="hidden" name="reply_to" value="{{.Root.ID}}">
         <input type="hidden" name="reply_to_pubkey" value="{{.Root.Pubkey}}">
         <div style="margin-bottom:10px;font-size:13px;color:#666;">
-          Replying as: <span style="font-family:monospace;color:#667eea;">{{slice .UserPubKey 0 12}}...</span>
+          Replying as: <span style="color:#2e7d32;font-weight:500;">{{.UserDisplayName}}</span>
         </div>
         <textarea name="content" placeholder="Write a reply..." required
                   style="width:100%;padding:12px;border:1px solid #ced4da;border-radius:4px;font-size:14px;font-family:inherit;min-height:60px;resize:vertical;margin-bottom:10px;"></textarea>
@@ -1484,6 +1772,7 @@ var htmlThreadTemplate = `<!DOCTYPE html>
       <div class="replies-section">
         <h3>Replies ({{len .Replies}})</h3>
         {{range .Replies}}
+        {{$reply := .}}
         <article class="note reply">
           <div class="note-author">
             <a href="/html/profile/{{.Pubkey}}" style="text-decoration:none;">
@@ -1506,17 +1795,36 @@ var htmlThreadTemplate = `<!DOCTYPE html>
             </div>
           </div>
           <div class="note-content">{{.ContentHTML}}</div>
-          {{if $.LoggedIn}}
-          <div style="margin:8px 0;">
+          <div class="note-reactions" style="margin:8px 0;">
+            {{if and .Reactions (index .Reactions.ByType "❤️")}}
+            {{if $.LoggedIn}}
             <form method="POST" action="/html/react" style="display:inline;margin:0;">
-              <input type="hidden" name="event_id" value="{{.ID}}">
-              <input type="hidden" name="event_pubkey" value="{{.Pubkey}}">
+              <input type="hidden" name="event_id" value="{{$reply.ID}}">
+              <input type="hidden" name="event_pubkey" value="{{$reply.Pubkey}}">
               <input type="hidden" name="return_url" value="{{$.CurrentURL}}">
-              <input type="hidden" name="reaction" value="+">
-              <button type="submit" style="background:#f0f0f0;border:none;border-radius:16px;padding:4px 10px;font-size:13px;cursor:pointer;color:#555;">+</button>
+              <input type="hidden" name="reaction" value="❤️">
+              <button type="submit" class="reaction-badge">❤️ {{index .Reactions.ByType "❤️"}} +</button>
             </form>
+            {{else}}
+            <span class="reaction-badge">❤️ {{index .Reactions.ByType "❤️"}}</span>
+            {{end}}
+            {{else if $.LoggedIn}}
+            <form method="POST" action="/html/react" style="display:inline;margin:0;">
+              <input type="hidden" name="event_id" value="{{$reply.ID}}">
+              <input type="hidden" name="event_pubkey" value="{{$reply.Pubkey}}">
+              <input type="hidden" name="return_url" value="{{$.CurrentURL}}">
+              <input type="hidden" name="reaction" value="❤️">
+              <button type="submit" class="reaction-badge">❤️ +</button>
+            </form>
+            {{end}}
+            {{if and .Reactions (gt .Reactions.Total 0)}}
+            {{range $type, $count := .Reactions.ByType}}
+            {{if ne $type "❤️"}}
+            <span class="reaction-badge">{{$type}} {{$count}}</span>
+            {{end}}
+            {{end}}
+            {{end}}
           </div>
-          {{end}}
           <div class="note-meta">
             <span>{{formatTime .CreatedAt}}</span>
             {{if .RelaysSeen}}
@@ -1547,11 +1855,12 @@ var htmlThreadTemplate = `<!DOCTYPE html>
 type HTMLThreadData struct {
 	Title      string
 	Meta       *MetaInfo
-	Root       *HTMLEventItem
-	Replies    []HTMLEventItem
-	LoggedIn   bool
-	UserPubKey string
-	CurrentURL string
+	Root            *HTMLEventItem
+	Replies         []HTMLEventItem
+	LoggedIn        bool
+	UserPubKey      string
+	UserDisplayName string
+	CurrentURL      string
 }
 
 // extractParentID extracts the parent event ID from the "e" tags
@@ -1581,6 +1890,13 @@ func renderThreadHTML(resp ThreadResponse, relays []string, session *BunkerSessi
 	nostrRefs := extractNostrRefs(contents)
 	resolvedRefs := batchResolveNostrRefs(nostrRefs, relays)
 
+	// Pre-fetch link previews for all URLs
+	var allURLs []string
+	for _, content := range contents {
+		allURLs = append(allURLs, ExtractPreviewableURLs(content)...)
+	}
+	linkPreviews := FetchLinkPreviews(allURLs)
+
 	// Generate npub for root author
 	rootNpub, _ := encodeBech32Pubkey(resp.Root.Pubkey)
 
@@ -1593,7 +1909,7 @@ func renderThreadHTML(resp ThreadResponse, relays []string, session *BunkerSessi
 		NpubShort:     formatNpubShort(rootNpub),
 		CreatedAt:     resp.Root.CreatedAt,
 		Content:       resp.Root.Content,
-		ContentHTML:   processContentToHTMLWithResolved(resp.Root.Content, relays, resolvedRefs),
+		ContentHTML:   processContentToHTMLFull(resp.Root.Content, relays, resolvedRefs, linkPreviews),
 		RelaysSeen:    resp.Root.RelaysSeen,
 		AuthorProfile: resp.Root.AuthorProfile,
 		ReplyCount:    resp.Root.ReplyCount,
@@ -1612,7 +1928,7 @@ func renderThreadHTML(resp ThreadResponse, relays []string, session *BunkerSessi
 			NpubShort:     formatNpubShort(npub),
 			CreatedAt:     item.CreatedAt,
 			Content:       item.Content,
-			ContentHTML:   processContentToHTMLWithResolved(item.Content, relays, resolvedRefs),
+			ContentHTML:   processContentToHTMLFull(item.Content, relays, resolvedRefs, linkPreviews),
 			RelaysSeen:    item.RelaysSeen,
 			AuthorProfile: item.AuthorProfile,
 			ReplyCount:    item.ReplyCount,
@@ -1631,7 +1947,9 @@ func renderThreadHTML(resp ThreadResponse, relays []string, session *BunkerSessi
 	// Add session info
 	if session != nil && session.Connected {
 		data.LoggedIn = true
-		data.UserPubKey = hex.EncodeToString(session.UserPubKey)
+		pubkeyHex := hex.EncodeToString(session.UserPubKey)
+		data.UserPubKey = pubkeyHex
+		data.UserDisplayName = getUserDisplayName(pubkeyHex)
 	}
 
 	// Template functions
@@ -1789,12 +2107,88 @@ var htmlProfileTemplate = `<!DOCTYPE html>
       margin: 8px 0;
       display: block;
     }
+    .note-video {
+      max-width: 100%;
+      border-radius: 8px;
+      margin: 8px 0;
+      display: block;
+    }
+    .note-audio {
+      width: 100%;
+      margin: 8px 0;
+      display: block;
+    }
+    .youtube-embed {
+      width: 100%;
+      aspect-ratio: 16/9;
+      border-radius: 8px;
+      margin: 8px 0;
+      display: block;
+    }
     .note-content a {
       color: #667eea;
       text-decoration: none;
     }
     .note-content a:hover {
       text-decoration: underline;
+    }
+    .link-preview {
+      display: flex;
+      border: 1px solid #e1e4e8;
+      border-radius: 8px;
+      margin: 12px 0;
+      overflow: hidden;
+      text-decoration: none;
+      color: inherit;
+      background: #fafbfc;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .link-preview:hover {
+      border-color: #667eea;
+      box-shadow: 0 2px 8px rgba(102, 126, 234, 0.15);
+      text-decoration: none;
+    }
+    .link-preview-image {
+      width: 120px;
+      min-width: 120px;
+      height: 90px;
+      object-fit: cover;
+      margin: 0;
+      border-radius: 0;
+    }
+    .link-preview-content {
+      padding: 10px 14px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+    .link-preview-site {
+      font-size: 11px;
+      color: #6a737d;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 2px;
+    }
+    .link-preview-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #24292e;
+      line-height: 1.3;
+      margin-bottom: 4px;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .link-preview-desc {
+      font-size: 12px;
+      color: #586069;
+      line-height: 1.4;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
     }
     .quoted-note {
       background: #f8f9fa;
@@ -2027,6 +2421,13 @@ func renderProfileHTML(resp ProfileResponse, relays []string, limit int) (string
 	nostrRefs := extractNostrRefs(contents)
 	resolvedRefs := batchResolveNostrRefs(nostrRefs, relays)
 
+	// Pre-fetch link previews for all URLs
+	var allURLs []string
+	for _, content := range contents {
+		allURLs = append(allURLs, ExtractPreviewableURLs(content)...)
+	}
+	linkPreviews := FetchLinkPreviews(allURLs)
+
 	// Generate npub from hex pubkey
 	npub, _ := encodeBech32Pubkey(resp.Pubkey)
 
@@ -2039,7 +2440,7 @@ func renderProfileHTML(resp ProfileResponse, relays []string, limit int) (string
 			Pubkey:        item.Pubkey,
 			CreatedAt:     item.CreatedAt,
 			Content:       item.Content,
-			ContentHTML:   processContentToHTMLWithResolved(item.Content, relays, resolvedRefs),
+			ContentHTML:   processContentToHTMLFull(item.Content, relays, resolvedRefs, linkPreviews),
 			RelaysSeen:    item.RelaysSeen,
 			AuthorProfile: item.AuthorProfile,
 		}

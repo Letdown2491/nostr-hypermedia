@@ -3,7 +3,6 @@ package main
 import (
 	"log/slog"
 	"strings"
-	"sync"
 
 	"golang.org/x/sync/singleflight"
 
@@ -73,23 +72,7 @@ func fetchRelayLists(pubkeys []string) map[string]*types.RelayList {
 	IncrementCacheMiss()
 
 	// Fetch missing pubkeys with per-pubkey singleflight (parallel)
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	freshLists := make(map[string]*types.RelayList)
-
-	for _, pk := range missing {
-		wg.Add(1)
-		go func(pubkey string) {
-			defer wg.Done()
-			relayList := fetchRelayList(pubkey)
-			if relayList != nil {
-				mu.Lock()
-				freshLists[pubkey] = relayList
-				mu.Unlock()
-			}
-		}(pk)
-	}
-	wg.Wait()
+	freshLists := fetchRelayListsUncached(missing)
 
 	// Merge results
 	result := make(map[string]*types.RelayList, len(cached)+len(freshLists))
@@ -101,6 +84,51 @@ func fetchRelayLists(pubkeys []string) map[string]*types.RelayList {
 	}
 
 	return result
+}
+
+// fetchRelayListsUncached fetches relay lists for pubkeys without checking cache.
+// Uses batcher for efficient batching of concurrent requests.
+// Used internally by fetchRelayLists and warmRelayListsAsync.
+func fetchRelayListsUncached(pubkeys []string) map[string]*types.RelayList {
+	if len(pubkeys) == 0 {
+		return nil
+	}
+
+	// Use batcher if available - it batches concurrent requests
+	if relayListBatcher != nil {
+		return relayListBatcher.GetMultiple(pubkeys)
+	}
+
+	// Fallback: direct batch fetch
+	return fetchRelayListsBatch(pubkeys)
+}
+
+// warmRelayListsAsync pre-fetches relay lists for pubkeys in the background.
+// This is fire-and-forget - it populates the cache for future requests.
+// Processes in batches to avoid overwhelming relays.
+func warmRelayListsAsync(pubkeys []string) {
+	if len(pubkeys) == 0 {
+		return
+	}
+
+	// Check which ones are missing from cache
+	_, missing := relayListCache.GetMultiple(pubkeys)
+	if len(missing) == 0 {
+		return
+	}
+
+	go func() {
+		const batchSize = 50
+		for i := 0; i < len(missing); i += batchSize {
+			end := i + batchSize
+			if end > len(missing) {
+				end = len(missing)
+			}
+			batch := missing[i:end]
+			fetchRelayListsUncached(batch)
+		}
+		slog.Debug("warmed relay lists", "count", len(missing))
+	}()
 }
 
 // fetchProfiles fetches kind 0 profiles with singleflight deduplication.

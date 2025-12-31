@@ -174,6 +174,7 @@ func DefaultBatcherConfig() BatcherConfig {
 // Global batchers for different data types
 var (
 	profileBatcher     *Batcher[*ProfileInfo]
+	relayListBatcher   *Batcher[*RelayList]
 	reactionsBatcher   *Batcher[*ReactionsSummary]
 	replyCountsBatcher *Batcher[int]
 
@@ -192,6 +193,16 @@ func InitBatchers() {
 			func(keys []string) map[string]*ProfileInfo {
 				// Use empty relays - the direct function will use profileRelays as fallback
 				return fetchProfilesWithOptionsDirect(nil, keys, false)
+			},
+			config.Window,
+			config.MaxBatch,
+		)
+
+		// Relay list batcher - batches kind:10002 fetches
+		relayListBatcher = NewBatcher(
+			"relay-lists",
+			func(keys []string) map[string]*RelayList {
+				return fetchRelayListsBatch(keys)
 			},
 			config.Window,
 			config.MaxBatch,

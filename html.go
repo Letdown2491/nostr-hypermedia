@@ -105,6 +105,8 @@ var (
 	cachedProfileAppend             *template.Template
 	cachedPostResponse              *template.Template
 	cachedReplyResponse             *template.Template
+	cachedInlineReplyForm           *template.Template
+	cachedInlineReplyResponse       *template.Template
 	// GIF picker templates
 	cachedGifsTemplate              *template.Template
 	cachedGifPanel                  *template.Template
@@ -305,7 +307,7 @@ func renderPostResponse(csrfToken string, newNote *HTMLEventItem) (string, error
 }
 
 // renderReplyResponse renders the cleared reply form plus the new reply as OOB prepend
-func renderReplyResponse(csrfToken, replyTo, replyToPubkey string, replyToKind int, replyToDTag, replyToRoot string, userDisplayName, userAvatarURL, userNpub string, newReply *HTMLEventItem, replyCount int) (string, error) {
+func renderReplyResponse(csrfToken, replyTo, replyToPubkey string, replyToKind int, replyToDTag, replyToRoot, replyToRelay string, userDisplayName, userAvatarURL, userNpub string, newReply *HTMLEventItem, replyCount int) (string, error) {
 	data := struct {
 		CSRFToken       string
 		ReplyTo         string
@@ -313,6 +315,7 @@ func renderReplyResponse(csrfToken, replyTo, replyToPubkey string, replyToKind i
 		ReplyToKind     int
 		ReplyToDTag     string
 		ReplyToRoot     string
+		ReplyToRelay    string
 		UserDisplayName string
 		UserAvatarURL   string
 		UserNpub        string
@@ -326,6 +329,7 @@ func renderReplyResponse(csrfToken, replyTo, replyToPubkey string, replyToKind i
 		ReplyToKind:     replyToKind,
 		ReplyToDTag:     replyToDTag,
 		ReplyToRoot:     replyToRoot,
+		ReplyToRelay:    replyToRelay,
 		UserDisplayName: userDisplayName,
 		UserAvatarURL:   userAvatarURL,
 		UserNpub:        userNpub,
@@ -337,6 +341,25 @@ func renderReplyResponse(csrfToken, replyTo, replyToPubkey string, replyToKind i
 	buf := getBuffer()
 	defer putBuffer(buf)
 	if err := cachedReplyResponse.ExecuteTemplate(buf, tmplReplyResponse, data); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
+}
+
+// renderInlineReplyResponse renders the new reply for inline reply submissions.
+// The response replaces the inline form with the new reply article.
+func renderInlineReplyResponse(newReply *HTMLEventItem, replyCount int) (string, error) {
+	data := struct {
+		NewReply   *HTMLEventItem
+		ReplyCount int
+	}{
+		NewReply:   newReply,
+		ReplyCount: replyCount,
+	}
+
+	buf := getBuffer()
+	defer putBuffer(buf)
+	if err := cachedInlineReplyResponse.ExecuteTemplate(buf, "inline-reply-response", data); err != nil {
 		return "", err
 	}
 	return buf.String(), nil
@@ -659,6 +682,8 @@ func initTemplates() {
 	cachedFollowButtonFragment = util.MustCompileTemplate("follow-button", templateFuncMap, templates.GetFollowButtonTemplate())
 	cachedPostResponse = util.MustCompileTemplate("post-response", templateFuncMap, templates.GetPostResponseTemplate()+kindTemplates)
 	cachedReplyResponse = util.MustCompileTemplate("reply-response", templateFuncMap, templates.GetReplyResponseTemplate()+kindTemplates)
+	cachedInlineReplyForm = util.MustCompileTemplate("inline-reply-form", templateFuncMap, templates.GetInlineReplyFormTemplate())
+	cachedInlineReplyResponse = util.MustCompileTemplate("inline-reply-response", templateFuncMap, templates.GetInlineReplyResponseTemplate()+kindTemplates)
 
 	// Compile standalone fragment templates
 	cachedWalletInfoFragment = util.MustCompileTemplate("wallet-info", templateFuncMap, templates.GetWalletInfoTemplate())
@@ -1089,6 +1114,8 @@ type HTMLAction struct {
 	HasCount  bool        // Whether to show count
 	GroupWith string      // If set, this action appears in another action's dropdown
 	Amounts   []int       // Preset amounts for zap dropdown (in sats)
+	HTarget   string      // Custom h-target selector for GET actions (inline replies)
+	HSwap     string      // Custom h-swap mode for GET actions (inline replies)
 }
 
 type HTMLField struct {
@@ -3560,18 +3587,31 @@ func renderThreadHTML(resp ThreadResponse, relays []string, session *BunkerSessi
 	root.ActionGroups = GroupActionsForKind(filteredRootActions, root.Kind)
 	root.LoggedIn = loggedIn
 
-	// Actions for replies
+	// NIP-10: Determine thread root ID early (needed for inline reply actions)
+	threadRootID := extractRootID(resp.Root.Tags)
+	if threadRootID == "" {
+		threadRootID = resp.Root.ID // This event is the thread root
+	}
+
+	// Actions for replies (with inline reply support)
 	for i := range replies {
 		reply := &replies[i]
 		var replyReactionCount int
 		if reply.Reactions != nil {
 			replyReactionCount = reply.Reactions.Total
 		}
+		// Get relay hint from the reply's RelaysSeen
+		var relayHint string
+		if len(reply.RelaysSeen) > 0 {
+			relayHint = reply.RelaysSeen[0]
+		}
 		ctx := ActionContext{
 			EventID:       reply.ID,
 			EventPubkey:   reply.Pubkey,
 			Kind:          reply.Kind,
 			DTag:          reply.DTag,
+			RelayHint:     relayHint,
+			ThreadRootID:  threadRootID,
 			IsBookmarked:  reply.IsBookmarked,
 			IsReacted:     reply.IsReacted,
 			IsReposted:    reply.IsReposted,
@@ -3585,6 +3625,7 @@ func renderThreadHTML(resp ThreadResponse, relays []string, session *BunkerSessi
 			CSRFToken:     csrfToken,
 			ReturnURL:     currentURL,
 			LoginURL:      loginURL,
+			PageType:      "thread",
 		}
 		replyEntity := BuildHypermediaEntity(ctx, reply.Tags, nil)
 		reply.ActionGroups = GroupActionsForKind(replyEntity.Actions, reply.Kind)
@@ -3609,13 +3650,6 @@ func renderThreadHTML(resp ThreadResponse, relays []string, session *BunkerSessi
 	var pageImage string
 	if root.AuthorProfile != nil && root.AuthorProfile.Picture != "" {
 		pageImage = root.AuthorProfile.Picture
-	}
-
-	// NIP-10: Determine the thread root for proper reply threading
-	// If the viewed event has a root tag, use that; otherwise the viewed event IS the root
-	threadRootID := extractRootID(resp.Root.Tags)
-	if threadRootID == "" {
-		threadRootID = resp.Root.ID // This event is the thread root
 	}
 
 	data := HTMLThreadData{

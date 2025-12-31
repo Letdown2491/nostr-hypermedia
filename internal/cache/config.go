@@ -29,8 +29,8 @@ func DefaultCacheConfig() CacheConfig {
 		ProfileTTL:           1 * time.Hour,   // Profiles rarely change hourly
 		ProfileNotFoundTTL:   30 * time.Second, // Short TTL allows lazy-loading to retry after page load timeout
 		ContactTTL:           10 * time.Minute, // Increased to reduce refetches
-		RelayListTTL:         1 * time.Hour,
-		RelayListNotFoundTTL: 5 * time.Minute,
+		RelayListTTL:         24 * time.Hour,   // Relay lists rarely change; long TTL avoids blocking outbox fetches
+		RelayListNotFoundTTL: 30 * time.Minute, // Retry users without relay lists less frequently
 		AvatarTTL:            1 * time.Hour, // Longer TTL - avatars rarely change
 		AvatarFailTTL:        5 * time.Minute,
 		LinkPreviewTTL:       24 * time.Hour,

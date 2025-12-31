@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	cfgpkg "nostr-server/internal/config"
+	"nostr-server/internal/util"
 )
 
 // ActionsConfig represents the JSON configuration for actions
@@ -292,10 +293,28 @@ func ConfigBuildAction(actionName string, ctx ActionContext) ActionDefinition {
 		fields = append(fields, field)
 	}
 
+	// Inline reply handling for thread pages
+	var hTarget, hSwap string
+	method := actionCfg.Method
+	if actionName == "reply" && ctx.PageType == "thread" {
+		// Override to use inline reply form via GET
+		href = util.BuildURL("/inline-reply-form", map[string]string{
+			"event_id":   ctx.EventID,
+			"pubkey":     ctx.EventPubkey,
+			"kind":       fmt.Sprintf("%d", ctx.Kind),
+			"relay":      ctx.RelayHint,
+			"root_id":    ctx.ThreadRootID,
+			"csrf_token": ctx.CSRFToken,
+		})
+		method = "GET"
+		hTarget = "#inline-reply-" + ctx.EventID
+		hSwap = "inner"
+	}
+
 	return ActionDefinition{
 		Name:      actionName,
 		Title:     title,
-		Method:    actionCfg.Method,
+		Method:    method,
 		Href:      href,
 		Class:     actionCfg.Class,
 		Rel:       actionCfg.Rel,
@@ -307,6 +326,8 @@ func ConfigBuildAction(actionName string, ctx ActionContext) ActionDefinition {
 		HasCount:  actionCfg.HasCount,
 		GroupWith: actionCfg.GroupWith,
 		Amounts:   actionCfg.Amounts,
+		HTarget:   hTarget,
+		HSwap:     hSwap,
 	}
 }
 

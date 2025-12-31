@@ -358,7 +358,8 @@ func (c *RelayListCacheWrapper) Get(pubkey string) (*RelayList, bool, bool) {
 	return cached.RelayList, cached.NotFound, true
 }
 
-// Set stores a relay list in the cache
+// Set stores a relay list in the cache.
+// Also stores a stale copy with longer TTL for fallback on fetch failures.
 func (c *RelayListCacheWrapper) Set(pubkey string, relayList *RelayList) {
 	ctx := context.Background()
 	cached := CachedRelayList{
@@ -376,6 +377,70 @@ func (c *RelayListCacheWrapper) Set(pubkey string, relayList *RelayList) {
 		ttl = c.config.RelayListNotFoundTTL
 	}
 	c.backend.Set(ctx, "relaylist:"+pubkey, data, ttl)
+
+	// Also store a stale copy with 7-day TTL for fallback
+	// Only store if we have a valid relay list (not for not-found entries)
+	if relayList != nil {
+		c.backend.Set(ctx, "relaylist-stale:"+pubkey, data, 7*24*time.Hour)
+	}
+}
+
+// GetStale retrieves a relay list from stale cache (7-day TTL).
+// Used as fallback when primary cache misses and fresh fetch fails.
+func (c *RelayListCacheWrapper) GetStale(pubkey string) *RelayList {
+	ctx := context.Background()
+	data, found, err := c.backend.Get(ctx, "relaylist-stale:"+pubkey)
+	if err != nil || !found {
+		return nil
+	}
+
+	var cached CachedRelayList
+	if err := json.Unmarshal(data, &cached); err != nil {
+		return nil
+	}
+
+	if cached.NotFound || cached.RelayList == nil {
+		return nil
+	}
+
+	return cached.RelayList
+}
+
+// GetMultipleStale retrieves relay lists from stale cache for multiple pubkeys.
+func (c *RelayListCacheWrapper) GetMultipleStale(pubkeys []string) map[string]*RelayList {
+	if len(pubkeys) == 0 {
+		return nil
+	}
+
+	ctx := context.Background()
+	keys := make([]string, len(pubkeys))
+	for i, pk := range pubkeys {
+		keys[i] = "relaylist-stale:" + pk
+	}
+
+	results, err := c.backend.GetMultiple(ctx, keys)
+	if err != nil {
+		return nil
+	}
+
+	found := make(map[string]*RelayList)
+	for i, pubkey := range pubkeys {
+		data, ok := results[keys[i]]
+		if !ok {
+			continue
+		}
+
+		var cached CachedRelayList
+		if err := json.Unmarshal(data, &cached); err != nil {
+			continue
+		}
+
+		if !cached.NotFound && cached.RelayList != nil {
+			found[pubkey] = cached.RelayList
+		}
+	}
+
+	return found
 }
 
 // GetMultiple retrieves multiple relay lists, returning found ones and list of missing pubkeys

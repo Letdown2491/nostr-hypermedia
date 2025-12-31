@@ -78,7 +78,11 @@ var PartialNoteFooter = `{{define "note-footer"}}
 {{define "action-pill"}}
 {{$a := .Action}}{{$eid := .EventID}}
 {{if eq $a.Method "GET"}}
+{{if $a.HTarget}}
+<a href="{{$a.Href}}" h-get h-target="{{$a.HTarget}}" h-swap="{{if $a.HSwap}}{{$a.HSwap}}{{else}}inner{{end}}" class="action-pill {{$a.Class}}{{if $a.Completed}} completed{{end}}"{{if $a.Rel}} rel="{{$a.Rel}}"{{end}}{{if eq $a.IconOnly "always"}} title="{{$a.Title}}" aria-label="{{$a.Title}}"{{end}}>{{template "pill-content" $a}}</a>
+{{else}}
 <a href="{{$a.Href}}" h-get h-target="#page-content" h-swap="inner" h-push-url h-scroll="top" h-prefetch class="action-pill {{$a.Class}}{{if $a.Completed}} completed{{end}}"{{if $a.Rel}} rel="{{$a.Rel}}"{{end}}{{if eq $a.IconOnly "always"}} title="{{$a.Title}}" aria-label="{{$a.Title}}"{{end}}>{{template "pill-content" $a}}</a>
+{{end}}
 {{else if eq $a.Name "mute"}}
 <form method="POST" action="{{$a.Href}}" class="action-pill-form" h-post h-target="#note-{{$eid}}" h-swap="delete" h-confirm="{{i18n "confirm.mute"}}">
   <input type="hidden" name="csrf_token" value="{{$a.CSRFToken}}">

@@ -197,9 +197,10 @@ func prefetchUserContactList(session *BunkerSession, relays []string) {
 				session.FollowingPubkeys = contacts
 				session.mu.Unlock()
 
-				// Prefetch profiles for contacts (for follows feed avatars)
+				// Prefetch profiles and relay lists for contacts (for follows feed)
 				if len(contacts) > 0 {
 					go prefetchContactProfiles(contacts)
+					go warmRelayListsAsync(contacts)
 				}
 			}
 		case <-ctx.Done():
@@ -880,7 +881,9 @@ func htmlReplyHandler(w http.ResponseWriter, r *http.Request) {
 	replyToKindStr := r.FormValue("reply_to_kind")
 	replyToDTag := strings.TrimSpace(r.FormValue("reply_to_dtag"))
 	replyToRoot := strings.TrimSpace(r.FormValue("reply_to_root"))
+	replyToRelay := strings.TrimSpace(r.FormValue("reply_to_relay"))
 	replyCountStr := r.FormValue("reply_count")
+	isInlineReply := r.FormValue("inline") == "1"
 	contentWarning := strings.TrimSpace(r.FormValue("content_warning"))
 	contentWarningCustom := strings.TrimSpace(r.FormValue("content_warning_custom"))
 	mentionsJSON := r.FormValue("mentions")
@@ -920,22 +923,25 @@ func htmlReplyHandler(w http.ResponseWriter, r *http.Request) {
 
 	if replyToKind == 1 {
 		// NIP-10 reply (kind 1): use explicit root and reply markers
+		// Full e-tag format: ["e", <event-id>, <relay-url>, <marker>, <pubkey>]
 		eventKind = 1
 
 		// Determine if we're replying to the thread root or a nested reply
 		if replyToRoot == "" || replyToRoot == replyTo {
 			// Replying directly to the thread root: single tag with "root" marker
 			tags = [][]string{
-				{"e", replyTo, "", "root"},
+				{"e", replyTo, replyToRelay, "root", replyToPubkey},
 			}
 		} else {
 			// Replying to a nested reply: both root and reply tags
+			// Note: we don't have relay hint for root, only for direct parent
 			tags = [][]string{
 				{"e", replyToRoot, "", "root"},
-				{"e", replyTo, "", "reply"},
+				{"e", replyTo, replyToRelay, "reply", replyToPubkey},
 			}
 		}
 
+		// Add p-tag for reply target author (enables notifications)
 		if replyToPubkey != "" {
 			if decoded, err := hex.DecodeString(replyToPubkey); err == nil && len(decoded) == 32 {
 				tags = append(tags, []string{"p", replyToPubkey})
@@ -1085,7 +1091,15 @@ func htmlReplyHandler(w http.ResponseWriter, r *http.Request) {
 			replyCount = n + 1
 		}
 
-		html, err := renderReplyResponse(newCSRFToken, replyTo, replyToPubkey, replyToKind, replyToDTag, replyToRoot, userDisplayName, userAvatarURL, npub, newReply, replyCount)
+		var html string
+		var err error
+		if isInlineReply {
+			// Inline reply: render just the new reply article
+			html, err = renderInlineReplyResponse(newReply, replyCount)
+		} else {
+			// Main reply form: render cleared form + OOB prepend
+			html, err = renderReplyResponse(newCSRFToken, replyTo, replyToPubkey, replyToKind, replyToDTag, replyToRoot, replyToRelay, userDisplayName, userAvatarURL, npub, newReply, replyCount)
+		}
 		if err != nil {
 			slog.Error("failed to render reply response", "error", err)
 			util.RespondInternalError(w, "Failed to render response")

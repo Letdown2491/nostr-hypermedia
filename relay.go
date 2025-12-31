@@ -430,7 +430,10 @@ func fetchFromRelayWithURL(ctx context.Context, relayURL string, filter Filter, 
 
 	sub, err := relayPool.Subscribe(ctx, relayURL, subID, reqFilter)
 	if err != nil {
-		slog.Debug("subscribe failed", "relay", relayURL, "error", err)
+		// Don't log context cancellation - it's expected during early exit
+		if ctx.Err() == nil {
+			slog.Debug("subscribe failed", "relay", relayURL, "error", err)
+		}
 		return
 	}
 	defer relayPool.Unsubscribe(relayURL, sub)
@@ -1292,26 +1295,91 @@ func fetchRelayListDirect(pubkey string) *RelayList {
 	}
 
 	IncrementCacheMiss()
-	indexerRelays := config.GetDefaultRelays()
 
-	filter := Filter{
-		Authors: []string{pubkey},
-		Kinds:   []int{10002},
-		Limit:   1,
-	}
+	// Use batch fetch for single pubkey
+	results := fetchRelayListsBatch([]string{pubkey})
+	return results[pubkey]
+}
 
-	events, _ := fetchEventsFromRelaysWithTimeout(indexerRelays, filter, 2*time.Second)
-	if len(events) == 0 {
-		relayListCache.Set(pubkey, nil)
+// fetchRelayListsBatch fetches kind:10002 relay lists for multiple pubkeys in one query.
+// Returns a map of pubkey -> RelayList (nil for pubkeys with no relay list).
+// Caches all results including not-found markers.
+// Falls back to stale cache for pubkeys where fresh fetch fails.
+func fetchRelayListsBatch(pubkeys []string) map[string]*RelayList {
+	if len(pubkeys) == 0 {
 		return nil
 	}
 
+	indexerRelays := config.GetDefaultRelays()
+
+	filter := Filter{
+		Authors: pubkeys,
+		Kinds:   []int{10002},
+		Limit:   len(pubkeys), // One per author
+	}
+
+	events, _ := fetchEventsFromRelaysWithTimeout(indexerRelays, filter, 2*time.Second)
+
+	// Build results map
+	result := make(map[string]*RelayList, len(pubkeys))
+
+	// Track which pubkeys we got events for
+	foundPubkeys := make(map[string]bool)
+
+	for _, evt := range events {
+		// Skip if we already processed this author (keep most recent)
+		if foundPubkeys[evt.PubKey] {
+			continue
+		}
+		foundPubkeys[evt.PubKey] = true
+
+		relayList := parseRelayListEvent(evt)
+		result[evt.PubKey] = relayList
+		relayListCache.Set(evt.PubKey, relayList)
+	}
+
+	// For pubkeys not found in fresh fetch, try stale cache as fallback
+	notFoundPubkeys := make([]string, 0)
+	for _, pk := range pubkeys {
+		if !foundPubkeys[pk] {
+			notFoundPubkeys = append(notFoundPubkeys, pk)
+		}
+	}
+
+	if len(notFoundPubkeys) > 0 {
+		// Try stale cache for missing pubkeys
+		staleResults := relayListCache.GetMultipleStale(notFoundPubkeys)
+		stillNotFound := make([]string, 0)
+
+		for _, pk := range notFoundPubkeys {
+			if staleRL, ok := staleResults[pk]; ok && staleRL != nil {
+				// Found in stale cache - use it but don't update fresh cache
+				result[pk] = staleRL
+				slog.Debug("using stale relay list", "pubkey", shortID(pk))
+			} else {
+				// Truly not found
+				result[pk] = nil
+				stillNotFound = append(stillNotFound, pk)
+			}
+		}
+
+		// Only mark as not-found the ones not in stale cache either
+		if len(stillNotFound) > 0 {
+			relayListCache.SetNotFound(stillNotFound)
+		}
+	}
+
+	return result
+}
+
+// parseRelayListEvent extracts relay list from a kind:10002 event
+func parseRelayListEvent(evt Event) *RelayList {
 	relayList := &RelayList{
 		Read:  []string{},
 		Write: []string{},
 	}
 
-	for _, tag := range events[0].Tags {
+	for _, tag := range evt.Tags {
 		if len(tag) < 2 || tag[0] != "r" {
 			continue
 		}
@@ -1337,8 +1405,6 @@ func fetchRelayListDirect(pubkey string) *RelayList {
 			relayList.Write = append(relayList.Write, relayURL)
 		}
 	}
-
-	relayListCache.Set(pubkey, relayList)
 
 	return relayList
 }
@@ -1422,8 +1488,8 @@ func groupPubkeysByWriteRelays(pubkeys []string, relayLists map[string]*RelayLis
 
 // Outbox model constants
 const (
-	maxOutboxRelayGroups = 25            // Max relay groups to query
-	tier1RelayCount      = 8             // Fast tier: connected + top scored relays
+	maxOutboxRelayGroups = 25                      // Max relay groups to query
+	tier1RelayCount      = 12                      // Fast tier: connected + top scored relays
 	tier1Timeout         = 800 * time.Millisecond // Short timeout for fast tier
 	tier2Timeout         = 2 * time.Second        // Extended timeout if we need more
 )

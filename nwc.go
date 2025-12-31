@@ -197,7 +197,7 @@ func (c *NWCClient) Connect(ctx context.Context) error {
 		return nil
 	}
 
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, c.config.Relay, nil)
+	conn, _, err := wsDialer.DialContext(ctx, c.config.Relay, nil)
 	if err != nil {
 		return fmt.Errorf("failed to connect to relay %s: %v", c.config.Relay, err)
 	}

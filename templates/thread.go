@@ -96,6 +96,7 @@ var threadContent = `{{define "content"}}
     <input type="hidden" name="reply_to" value="{{.Root.ID}}">
     <input type="hidden" name="reply_to_pubkey" value="{{.Root.Pubkey}}">
     <input type="hidden" name="reply_to_kind" value="{{.Root.Kind}}">
+    {{if .Root.RelaysSeen}}<input type="hidden" name="reply_to_relay" value="{{index .Root.RelaysSeen 0}}">{{end}}
     {{if .Root.DTag}}<input type="hidden" name="reply_to_dtag" value="{{.Root.DTag}}">{{end}}
     <input type="hidden" name="reply_to_root" value="{{.ThreadRootID}}">
     <input type="hidden" name="reply_count" value="{{.TotalReplyCount}}">
@@ -153,6 +154,7 @@ var threadContent = `{{define "content"}}
       </details>{{end}}
       {{template "note-footer" .Parent}}
     </article>
+    <div id="inline-reply-{{.Parent.ID}}" class="inline-reply-container"></div>
     {{if .Children}}
     <div class="reply-children">
       {{range .Children}}
@@ -172,6 +174,7 @@ var threadContent = `{{define "content"}}
         </details>{{end}}
         {{template "note-footer" .}}
       </article>
+      <div id="inline-reply-{{.ID}}" class="inline-reply-container"></div>
       {{end}}
     </div>
     {{end}}

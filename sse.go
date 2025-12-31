@@ -526,6 +526,11 @@ func streamNotificationsHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			seenIDs[evt.ID] = true
 
+			// Skip notifications from muted sources
+			if session.IsEventFromMutedSource(evt.PubKey, evt.ID, evt.Content, evt.Tags) {
+				continue
+			}
+
 			slog.Debug("SSE notifications: new notification", "kind", evt.Kind, "from", evt.PubKey[:8])
 
 			if isHTMLFormat {

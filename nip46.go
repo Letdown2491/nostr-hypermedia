@@ -497,7 +497,21 @@ func ParseBunkerURL(bunkerURL string) (*BunkerSession, error) {
 	}
 
 	// Extract optional secret
+	// Note: Query().Get() URL-decodes, which converts + to space in query strings
+	// Use RawQuery parsing to preserve the exact secret value
 	secret := u.Query().Get("secret")
+
+	// Debug: log secret characteristics (not the actual value)
+	if secret != "" {
+		hasSpace := strings.Contains(secret, " ")
+		hasPlus := strings.Contains(secret, "+")
+		slog.Debug("NIP-46: parsed bunker secret",
+			"length", len(secret),
+			"has_space", hasSpace,
+			"has_plus", hasPlus,
+			"first_char", string(secret[0]),
+			"last_char", string(secret[len(secret)-1]))
+	}
 
 	// Generate disposable client keypair
 	clientPrivKey, err := nips.GeneratePrivateKey()
@@ -547,11 +561,16 @@ func (s *BunkerSession) Connect(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Build connect params
-	params := []string{hex.EncodeToString(s.RemoteSignerPubKey)}
+	// Build connect params: [<pubkey>, <secret>] or just [<secret>]
+	// For bunker:// URLs, we include the secret from the URL
+	// Some signers expect empty pubkey, others want the client pubkey
+	var params []string
 	if s.Secret != "" {
-		params = append(params, s.Secret)
+		// Send client pubkey and secret - this is what most signers expect for bunker:// URLs
+		params = []string{hex.EncodeToString(s.ClientPubKey), s.Secret}
 	}
+
+	slog.Debug("NIP-46: sending connect request", "remote_signer", hex.EncodeToString(s.RemoteSignerPubKey)[:16], "relays", s.Relays, "has_secret", s.Secret != "", "params_count", len(params))
 
 	// Send connect request
 	result, err := s.sendRequest(ctx, "connect", params)
@@ -683,7 +702,7 @@ func (s *BunkerSession) getOrCreateRelayConn(ctx context.Context, relayURL strin
 
 // connect establishes the WebSocket connection and starts the reader goroutine
 func (rc *nip46RelayConn) connect(ctx context.Context) error {
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, rc.url, nil)
+	conn, _, err := wsDialer.DialContext(ctx, rc.url, nil)
 	if err != nil {
 		return fmt.Errorf("failed to connect to %s: %v", rc.url, err)
 	}
@@ -699,10 +718,13 @@ func (rc *nip46RelayConn) connect(ctx context.Context) error {
 		return fmt.Errorf("failed to generate subscription ID: %v", err)
 	}
 	rc.subID = "nip46-" + subIDSuffix[:8]
+	clientPubKeyHex := hex.EncodeToString(rc.session.ClientPubKey)
+
+	// Don't use 'since' filter - clock skew between VPS and relays can cause events to be filtered out
+	// The subscription is short-lived anyway, so we just filter by kind and p-tag
 	subFilter := map[string]interface{}{
 		"kinds": []int{24133},
-		"#p":    []string{hex.EncodeToString(rc.session.ClientPubKey)},
-		"since": time.Now().Unix() - 10,
+		"#p":    []string{clientPubKeyHex},
 	}
 	subReq := []interface{}{"REQ", rc.subID, subFilter}
 	if err := conn.WriteJSON(subReq); err != nil {
@@ -710,7 +732,7 @@ func (rc *nip46RelayConn) connect(ctx context.Context) error {
 		return fmt.Errorf("failed to subscribe: %v", err)
 	}
 
-	slog.Debug("NIP-46: connected to relay", "relay", rc.url, "subID", rc.subID)
+	slog.Debug("NIP-46: connected to relay", "relay", rc.url, "subID", rc.subID, "listening_for_pubkey", clientPubKeyHex, "server_time", time.Now().Unix())
 
 	// Start background reader
 	go rc.readLoop()
@@ -755,25 +777,49 @@ func (rc *nip46RelayConn) readLoop() {
 			rc.lastActivity = time.Now()
 
 			if len(msg) < 2 {
+				slog.Debug("NIP-46: received short message", "relay", rc.url, "len", len(msg))
 				continue
 			}
 
 			msgType, ok := msg[0].(string)
 			if !ok {
+				slog.Debug("NIP-46: received non-string message type", "relay", rc.url)
 				continue
 			}
 
+			// Log all incoming messages for debugging
+			slog.Debug("NIP-46: received message", "relay", rc.url, "type", msgType)
+
 			switch msgType {
 			case "EVENT":
+				slog.Debug("NIP-46: EVENT received!", "relay", rc.url, "subID", rc.subID)
 				rc.handleEvent(msg)
+			case "EOSE":
+				// End of stored events - subscription is now active and waiting for new events
+				slog.Debug("NIP-46: EOSE received - subscription active", "relay", rc.url, "subID", rc.subID)
 			case "OK":
-				// Event was accepted, nothing to do
+				// Event was accepted by relay
+				if len(msg) >= 3 {
+					eventID, _ := msg[1].(string)
+					accepted, _ := msg[2].(bool)
+					var reason string
+					if len(msg) >= 4 {
+						reason, _ = msg[3].(string)
+					}
+					if eventID != "" {
+						slog.Debug("NIP-46: relay OK response", "relay", rc.url, "event_id", eventID[:16], "accepted", accepted, "reason", reason)
+					}
+				}
 			case "NOTICE":
 				if len(msg) >= 2 {
 					slog.Debug("NIP-46: relay notice", "relay", rc.url, "message", msg[1])
 				}
 			case "CLOSED":
-				slog.Debug("NIP-46: subscription closed by relay", "relay", rc.url)
+				if len(msg) >= 2 {
+					slog.Debug("NIP-46: subscription closed by relay", "relay", rc.url, "reason", msg[1])
+				} else {
+					slog.Debug("NIP-46: subscription closed by relay", "relay", rc.url)
+				}
 				go rc.scheduleReconnect()
 				return
 			}
@@ -797,13 +843,38 @@ func (rc *nip46RelayConn) handleEvent(msg []interface{}) {
 		return
 	}
 
-	// Verify it's from the remote signer
-	if responseEvent.PubKey != hex.EncodeToString(rc.session.RemoteSignerPubKey) {
+	// Log full details of received event for debugging
+	var pTags []string
+	for _, tag := range responseEvent.Tags {
+		if len(tag) >= 2 && tag[0] == "p" {
+			pTags = append(pTags, tag[1])
+		}
+	}
+	clientPubKeyHex := hex.EncodeToString(rc.session.ClientPubKey)
+	slog.Debug("NIP-46: received event details",
+		"relay", rc.url,
+		"from_pubkey", responseEvent.PubKey,
+		"p_tags", pTags,
+		"our_pubkey", clientPubKeyHex,
+		"kind", responseEvent.Kind,
+		"created_at", responseEvent.CreatedAt)
+
+	// Compute conversation key with the responding pubkey
+	// The signer may respond with a different pubkey than the bunker URL (e.g., user's actual pubkey)
+	responderPubKey, err := hex.DecodeString(responseEvent.PubKey)
+	if err != nil {
+		slog.Debug("NIP-46: invalid responder pubkey", "error", err)
+		return
+	}
+
+	convKey, err := nips.GetConversationKey(rc.session.ClientPrivKey, responderPubKey)
+	if err != nil {
+		slog.Debug("NIP-46: failed to compute conversation key", "error", err)
 		return
 	}
 
 	// Decrypt response
-	decrypted, err := nips.Nip44Decrypt(responseEvent.Content, rc.session.ConversationKey)
+	decrypted, err := nips.Nip44Decrypt(responseEvent.Content, convKey)
 	if err != nil {
 		slog.Error("NIP-46: failed to decrypt response", "relay", rc.url, "error", err)
 		return
@@ -812,6 +883,16 @@ func (rc *nip46RelayConn) handleEvent(msg []interface{}) {
 	var response NIP46Response
 	if err := json.Unmarshal([]byte(decrypted), &response); err != nil {
 		slog.Error("NIP-46: failed to parse response", "relay", rc.url, "error", err)
+		return
+	}
+
+	slog.Debug("NIP-46: decrypted response", "id", response.ID, "result", response.Result, "error", response.Error)
+
+	// Handle auth_url response - this means "waiting for user approval in signer app"
+	// The error field may contain the auth URL, but this is not an error condition
+	if response.Result == "auth_url" {
+		slog.Debug("NIP-46: auth_url response received, waiting for user approval")
+		// Don't route this response - keep waiting for the actual ack
 		return
 	}
 
@@ -824,8 +905,8 @@ func (rc *nip46RelayConn) handleEvent(msg []interface{}) {
 	rc.pendingMu.Unlock()
 
 	if exists {
-		if response.Error != "" {
-			// Send error as special value (will be detected by caller)
+		if response.Error != "" && response.Result == "" {
+			// Only treat as error if result is empty (actual error, not auth_url)
 			ch <- "ERROR:" + response.Error
 		} else {
 			ch <- response.Result
@@ -910,6 +991,7 @@ func (rc *nip46RelayConn) sendEvent(ctx context.Context, event *Event, reqID str
 	if err := rc.conn.WriteJSON(pubReq); err != nil {
 		return "", fmt.Errorf("failed to publish: %v", err)
 	}
+	slog.Debug("NIP-46: published request event", "relay", rc.url, "event_id", event.ID[:16], "req_id", reqID)
 
 	// Wait for response with timeout
 	select {
@@ -953,7 +1035,11 @@ func (s *BunkerSession) CloseRelayConns() {
 	slog.Debug("NIP-46: closed all relay connections", "session", s.ID[:8])
 }
 
-// sendRequest sends a NIP-46 request and waits for response using persistent connections
+// Per-relay timeout for connection attempts (each relay gets its own timeout)
+const nip46PerRelayTimeout = 15 * time.Second
+
+// sendRequest sends a NIP-46 request and waits for response using persistent connections.
+// Tries all relays in parallel and returns the first successful response.
 func (s *BunkerSession) sendRequest(ctx context.Context, method string, params []string) (string, error) {
 	// Generate request ID
 	reqIDBytes := make([]byte, 8)
@@ -983,35 +1069,74 @@ func (s *BunkerSession) sendRequest(ctx context.Context, method string, params [
 	// Create kind 24133 event
 	requestEvent := createNIP46Event(s.ClientPrivKey, s.ClientPubKey, s.RemoteSignerPubKey, encryptedContent)
 
-	// Create context with timeout for the request
+	// Log the request details for debugging
+	slog.Debug("NIP-46: sending request",
+		"method", method,
+		"req_id", reqID,
+		"our_pubkey", hex.EncodeToString(s.ClientPubKey),
+		"target_pubkey", hex.EncodeToString(s.RemoteSignerPubKey),
+		"event_id", requestEvent.ID[:16])
+
+	// Create context with overall timeout
 	reqCtx, cancel := context.WithTimeout(ctx, nip46RequestTimeout)
 	defer cancel()
 
-	// Try each relay until we get a response
-	var lastErr error
+	// Try all relays in parallel, return first success
+	type relayResult struct {
+		result string
+		err    error
+		relay  string
+	}
+
+	resultCh := make(chan relayResult, len(s.Relays))
+	var wg sync.WaitGroup
+
 	for _, relayURL := range s.Relays {
-		// Get or create persistent connection
-		rc, err := s.getOrCreateRelayConn(reqCtx, relayURL)
-		if err != nil {
-			slog.Debug("NIP-46: failed to get relay connection", "relay", relayURL, "error", err)
-			lastErr = err
-			continue
-		}
+		wg.Add(1)
+		go func(relay string) {
+			defer wg.Done()
 
-		// Send through persistent connection
-		result, err := rc.sendEvent(reqCtx, requestEvent, reqID)
-		if err != nil {
-			slog.Debug("NIP-46: relay request failed", "relay", relayURL, "error", err)
-			lastErr = err
-			continue
-		}
-		return result, nil
+			// Each relay gets its own timeout
+			relayCtx, relayCancel := context.WithTimeout(reqCtx, nip46PerRelayTimeout)
+			defer relayCancel()
+
+			// Get or create persistent connection
+			rc, err := s.getOrCreateRelayConn(relayCtx, relay)
+			if err != nil {
+				slog.Debug("NIP-46: failed to get relay connection", "relay", relay, "error", err)
+				resultCh <- relayResult{err: err, relay: relay}
+				return
+			}
+
+			// Send through persistent connection
+			result, err := rc.sendEvent(relayCtx, requestEvent, reqID)
+			if err != nil {
+				slog.Debug("NIP-46: relay request failed", "relay", relay, "error", err)
+				resultCh <- relayResult{err: err, relay: relay}
+				return
+			}
+
+			resultCh <- relayResult{result: result, relay: relay}
+		}(relayURL)
 	}
 
-	if lastErr != nil {
-		return "", fmt.Errorf("all relays failed: %v", lastErr)
+	// Close result channel when all goroutines complete
+	go func() {
+		wg.Wait()
+		close(resultCh)
+	}()
+
+	// Collect results, return first success
+	var errors []string
+	for res := range resultCh {
+		if res.err == nil {
+			slog.Debug("NIP-46: request succeeded", "relay", res.relay, "method", method)
+			return res.result, nil
+		}
+		errors = append(errors, fmt.Sprintf("%s: %v", res.relay, res.err))
 	}
-	return "", errors.New("all relays failed")
+
+	return "", fmt.Errorf("all relays failed: %s", strings.Join(errors, "; "))
 }
 
 // createNIP46Event creates a signed kind 24133 event

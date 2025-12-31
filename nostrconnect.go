@@ -185,7 +185,7 @@ func listenOnRelay(relayURL string, kp *ServerKeypair) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, relayURL, nil)
+	conn, _, err := wsDialer.DialContext(ctx, relayURL, nil)
 	if err != nil {
 		return fmt.Errorf("connect failed: %v", err)
 	}
@@ -405,7 +405,7 @@ func fetchUserPubKey(pending *PendingConnection, remoteSignerPubKeyHex string, s
 }
 
 func sendAndWaitForResponse(ctx context.Context, relayURL string, event *Event, expectedReqID string, convKey []byte, expectedPubKey string) (string, error) {
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, relayURL, nil)
+	conn, _, err := wsDialer.DialContext(ctx, relayURL, nil)
 	if err != nil {
 		return "", fmt.Errorf("connect failed: %v", err)
 	}

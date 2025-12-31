@@ -7,23 +7,26 @@
     "wss://relay.primal.net",
     "wss://relay.damus.io",
     "wss://nos.lol",
-    "wss://relay.nostr.band",
     "wss://nostr.mom"
   ],
   "nostrConnectRelays": [
-    "wss://relay.nsec.app",
+    "wss://relay.nip46.com",
     "wss://relay.primal.net",
+    "wss://theforest.nostr1.com",
     "wss://relay.damus.io"
   ],
-  "searchRelays": ["wss://relay.nostr.band"],
+  "searchRelays": [
+    "wss://search.nos.today",
+    "wss://search.nostr.wine",
+    "wss://cache1.primal.net"
+  ],
   "publishRelays": [
     "wss://relay.primal.net",
     "wss://relay.damus.io",
-    "wss://relay.nostr.band"
+    "wss://nos.lol"
   ],
   "profileRelays": [
     "wss://purplepag.es",
-    "wss://relay.nostr.band",
     "wss://relay.primal.net",
     "wss://relay.damus.io",
     "wss://nos.lol"

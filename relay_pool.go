@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log/slog"
 	"net"
-	"net/http"
 	"net/url"
 	"sort"
 	"strings"
@@ -13,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"golang.org/x/sync/singleflight"
 
 	"nostr-server/internal/config"
 	"nostr-server/internal/nostr"
@@ -31,23 +31,6 @@ const (
 const (
 	maxConcurrentReqsPerRelay = 10               // Max concurrent subscriptions per relay
 	semaphoreAcquireTimeout   = 5 * time.Second  // Timeout for acquiring semaphore slot
-)
-
-// DNS cache to avoid repeated lookups for the same host
-const (
-	dnsCacheTTL     = 5 * time.Minute
-	dnsCacheMaxSize = 500 // Limit entries to prevent unbounded growth
-)
-
-type dnsCacheEntry struct {
-	ips       []net.IP
-	expiresAt time.Time
-	safe      bool // cached safety check result
-}
-
-var (
-	dnsCache   = make(map[string]*dnsCacheEntry)
-	dnsCacheMu sync.RWMutex
 )
 
 // Write-only relay detection (relays that accept EVENT but not REQ)
@@ -102,89 +85,6 @@ func markRelayAsWriteOnly(relayURL string) {
 	writeOnlyRelaysMu.Unlock()
 
 	slog.Info("relay detected as write-only", "relay", normalized)
-}
-
-// lookupIPCached performs DNS lookup with caching
-func lookupIPCached(host string) ([]net.IP, error) {
-	dnsCacheMu.RLock()
-	entry, exists := dnsCache[host]
-	dnsCacheMu.RUnlock()
-
-	if exists && time.Now().Before(entry.expiresAt) {
-		return entry.ips, nil
-	}
-
-	ips, err := net.LookupIP(host)
-	if err != nil {
-		return nil, err
-	}
-
-	dnsCacheMu.Lock()
-	// Evict oldest entries if at max size
-	if len(dnsCache) >= dnsCacheMaxSize {
-		dnsCacheEvictOldest()
-	}
-	dnsCache[host] = &dnsCacheEntry{
-		ips:       ips,
-		expiresAt: time.Now().Add(dnsCacheTTL),
-	}
-	dnsCacheMu.Unlock()
-
-	return ips, nil
-}
-
-// dnsCacheEvictOldest removes 10% of oldest entries (must hold write lock)
-func dnsCacheEvictOldest() {
-	toRemove := dnsCacheMaxSize / 10
-	if toRemove < 1 {
-		toRemove = 1
-	}
-
-	type hostExpiry struct {
-		host      string
-		expiresAt time.Time
-	}
-
-	entries := make([]hostExpiry, 0, len(dnsCache))
-	for host, entry := range dnsCache {
-		entries = append(entries, hostExpiry{host, entry.expiresAt})
-	}
-
-	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].expiresAt.Before(entries[j].expiresAt)
-	})
-
-	for i := 0; i < toRemove && i < len(entries); i++ {
-		delete(dnsCache, entries[i].host)
-	}
-}
-
-// Custom WebSocket dialer with proper timeouts
-var wsDialer = &websocket.Dialer{
-	Proxy:            http.ProxyFromEnvironment,
-	HandshakeTimeout: 10 * time.Second,
-	NetDialContext: (&net.Dialer{
-		Timeout:   10 * time.Second,
-		KeepAlive: 30 * time.Second,
-	}).DialContext,
-}
-
-// DNS cache cleanup goroutine
-func init() {
-	go func() {
-		ticker := time.NewTicker(5 * time.Minute)
-		defer ticker.Stop()
-		for range ticker.C {
-			dnsCacheMu.Lock()
-			now := time.Now()
-			for host, entry := range dnsCache {
-				if now.After(entry.expiresAt) {
-					delete(dnsCache, host)
-				}
-			}
-			dnsCacheMu.Unlock()
-		}
-	}()
 }
 
 // normalizeRelayURL validates and normalizes a relay URL from NIP-65 events
@@ -336,8 +236,7 @@ func (s *relaySemaphore) release() {
 type RelayPool struct {
 	mu          sync.RWMutex
 	connections map[string]*RelayConn
-	connecting  map[string]*sync.Mutex // Per-relay mutex to prevent duplicate dial attempts
-	connectMu   sync.Mutex             // Protects connecting map
+	dialGroup   singleflight.Group         // Deduplicates concurrent dial attempts per relay
 	semaphores  map[string]*relaySemaphore // Per-relay concurrency limiters
 	semMu       sync.RWMutex               // Protects semaphores map
 	stopCh      chan struct{}
@@ -361,7 +260,6 @@ var relayPool = NewRelayPool()
 func NewRelayPool() *RelayPool {
 	pool := &RelayPool{
 		connections: make(map[string]*RelayConn),
-		connecting:  make(map[string]*sync.Mutex),
 		semaphores:  make(map[string]*relaySemaphore),
 		stopCh:      make(chan struct{}),
 	}
@@ -457,6 +355,11 @@ func WarmupConnections() {
 func (p *RelayPool) getOrCreateConn(ctx context.Context, relayURL string) (*RelayConn, error) {
 	relayURL = strings.TrimSuffix(relayURL, "/")
 
+	// Early context check - avoid work if caller already canceled
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
 	if !isRelayURLSafe(relayURL) {
 		return nil, errors.New("relay URL blocked: unsafe destination")
 	}
@@ -473,22 +376,31 @@ func (p *RelayPool) getOrCreateConn(ctx context.Context, relayURL string) (*Rela
 		return rc, nil
 	}
 
-	// Get or create per-relay connection mutex to prevent duplicate dial attempts
-	p.connectMu.Lock()
-	relayMu, exists := p.connecting[relayURL]
-	if !exists {
-		relayMu = &sync.Mutex{}
-		p.connecting[relayURL] = relayMu
+	// Use singleflight to deduplicate concurrent dial attempts
+	// All goroutines trying to connect to the same relay share one dial attempt
+	ch := p.dialGroup.DoChan(relayURL, func() (interface{}, error) {
+		return p.dialRelay(relayURL)
+	})
+
+	// Wait for dial result or caller's context cancellation
+	select {
+	case <-ctx.Done():
+		// Caller canceled - but the dial continues for other waiters
+		return nil, ctx.Err()
+	case result := <-ch:
+		if result.Err != nil {
+			return nil, result.Err
+		}
+		return result.Val.(*RelayConn), nil
 	}
-	p.connectMu.Unlock()
+}
 
-	// Serialize connection attempts for this specific relay
-	relayMu.Lock()
-	defer relayMu.Unlock()
-
-	// Re-check after acquiring relay mutex (another goroutine may have connected)
+// dialRelay performs the actual connection to a relay.
+// Called via singleflight to deduplicate concurrent attempts.
+func (p *RelayPool) dialRelay(relayURL string) (*RelayConn, error) {
+	// Re-check if connection exists (may have been created while waiting for singleflight)
 	p.mu.RLock()
-	rc = p.connections[relayURL]
+	rc := p.connections[relayURL]
 	p.mu.RUnlock()
 
 	if rc != nil && !rc.isClosed() {
@@ -506,13 +418,15 @@ func (p *RelayPool) getOrCreateConn(ctx context.Context, relayURL string) (*Rela
 		}
 	}
 
+	// Use a background context with timeout for the dial
+	// This prevents one caller's cancellation from affecting other waiters
+	dialCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
 	slog.Debug("creating new relay connection", "relay", relayURL)
-	conn, _, err := wsDialer.DialContext(ctx, relayURL, nil)
+	conn, _, err := wsDialer.DialContext(dialCtx, relayURL, nil)
 	if err != nil {
-		// Don't penalize relay for context cancellation (early exit optimization)
-		if ctx.Err() == nil {
-			relayHealthStore.recordFailure(relayURL)
-		}
+		relayHealthStore.recordFailure(relayURL)
 		return nil, err
 	}
 
@@ -523,7 +437,7 @@ func (p *RelayPool) getOrCreateConn(ctx context.Context, relayURL string) (*Rela
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	// Another goroutine may have connected while we were dialing (shouldn't happen with relay mutex)
+	// Another dial may have completed (shouldn't happen with singleflight, but be safe)
 	if existing := p.connections[relayURL]; existing != nil && !existing.closed {
 		conn.Close()
 		return existing, nil

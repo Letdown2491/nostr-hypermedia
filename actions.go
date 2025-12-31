@@ -44,6 +44,8 @@ type ActionDefinition struct {
 	HasCount  bool              // Whether to show count
 	GroupWith string            // If set, this action appears in another action's dropdown
 	Amounts   []int             // Preset amounts for zap action dropdown (in sats)
+	HTarget   string            // Custom h-target selector (overrides default #page-content for GET)
+	HSwap     string            // Custom h-swap mode (overrides default "inner" for GET)
 }
 
 // FieldDefinition defines a form field for POST actions
@@ -59,6 +61,8 @@ type ActionContext struct {
 	EventPubkey    string
 	Kind           int
 	DTag           string // d-tag for addressable events (kind 30xxx)
+	RelayHint      string // Relay hint for NIP-10 e-tags (from RelaysSeen)
+	ThreadRootID   string // Thread root event ID (for inline replies)
 	IsBookmarked   bool
 	IsReacted      bool  // Whether user has already reacted to this event
 	IsReposted     bool  // Whether user has already reposted this event
@@ -74,6 +78,7 @@ type ActionContext struct {
 	CSRFToken      string
 	ReturnURL      string
 	LoginURL       string // URL to redirect to for login
+	PageType       string // "timeline", "thread", "profile" - affects action behavior
 }
 
 // StandardActions returns the display order for actions (from config)
@@ -260,6 +265,8 @@ func (a ActionDefinition) ToHTMLAction() HTMLAction {
 		HasCount:  a.HasCount,
 		GroupWith: a.GroupWith,
 		Amounts:   a.Amounts,
+		HTarget:   a.HTarget,
+		HSwap:     a.HSwap,
 	}
 }
 

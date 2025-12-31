@@ -2334,9 +2334,14 @@ func htmlCheckNewNotesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Use aggregator relays (same as outbox model fallback) for consistency
-	// Don't use user's read relays - they might have events that outbox won't fetch
-	relays := config.GetDefaultRelays()
+	// Use the same relay selection as the timeline for consistency:
+	// User's NIP-65 read relays if available, otherwise default relays
+	var relays []string
+	if session.UserRelayList != nil && len(session.UserRelayList.Read) > 0 {
+		relays = session.UserRelayList.Read
+	} else {
+		relays = config.GetDefaultRelays()
+	}
 
 	pubkeyHex := hex.EncodeToString(session.UserPubKey)
 	contacts, ok := contactCache.Get(pubkeyHex)
@@ -2369,7 +2374,8 @@ func htmlCheckNewNotesHandler(w http.ResponseWriter, r *http.Request) {
 	events, _ := fetchEventsFromRelaysWithTimeout(relays, queryFilter, 3*time.Second)
 	slog.Debug("check new posts: found events", "since", since, "kinds", kinds, "count", len(events), "contacts", len(contacts))
 
-	// Filter replies and user's own posts
+	// Apply the same filters as the timeline for consistency:
+	// 1. Filter replies and user's own posts
 	filtered := make([]Event, 0, len(events))
 	for _, evt := range events {
 		// Reposts (kind 6) use e tags for reference, not reply
@@ -2378,6 +2384,25 @@ func htmlCheckNewNotesHandler(w http.ResponseWriter, r *http.Request) {
 			if evt.PubKey != pubkeyHex {
 				filtered = append(filtered, evt)
 			}
+		}
+	}
+	events = filtered
+
+	// 2. Filter events missing required tags
+	filtered = make([]Event, 0, len(events))
+	for _, evt := range events {
+		kindDef := GetKindDefinition(evt.Kind)
+		if kindDef.HasRequiredTags(evt.Tags) {
+			filtered = append(filtered, evt)
+		}
+	}
+	events = filtered
+
+	// 3. Filter muted content
+	filtered = make([]Event, 0, len(events))
+	for _, evt := range events {
+		if !session.IsEventFromMutedSource(evt.PubKey, evt.ID, evt.Content, evt.Tags) {
+			filtered = append(filtered, evt)
 		}
 	}
 	events = filtered
@@ -2677,6 +2702,78 @@ func htmlComposeHandler(w http.ResponseWriter, r *http.Request) {
 	if err := cachedComposeTemplate.ExecuteTemplate(&buf, tmplBase, data); err != nil {
 		slog.Error("error rendering compose page", "error", err)
 		util.RespondInternalError(w, "Failed to render page")
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write([]byte(buf.String()))
+}
+
+// htmlInlineReplyFormHandler returns an inline reply form for thread pages
+// GET /inline-reply-form?event_id=...&pubkey=...&kind=...&relay=...&root_id=...&csrf_token=...
+func htmlInlineReplyFormHandler(w http.ResponseWriter, r *http.Request) {
+	session := getSessionFromRequest(r)
+	if session == nil || !session.Connected {
+		util.RespondUnauthorized(w, "Login required")
+		return
+	}
+
+	// Parse query parameters
+	eventID := r.URL.Query().Get("event_id")
+	pubkey := r.URL.Query().Get("pubkey")
+	kindStr := r.URL.Query().Get("kind")
+	relay := r.URL.Query().Get("relay")
+	rootID := r.URL.Query().Get("root_id")
+	csrfToken := r.URL.Query().Get("csrf_token")
+
+	if eventID == "" {
+		util.RespondBadRequest(w, "Missing event_id")
+		return
+	}
+
+	// Parse kind
+	kind := 1
+	if kindStr != "" {
+		if k, err := strconv.Atoi(kindStr); err == nil && k > 0 {
+			kind = k
+		}
+	}
+
+	// Get user info for avatar display
+	userPubkeyHex := hex.EncodeToString(session.UserPubKey)
+	userDisplayName := getUserDisplayName(userPubkeyHex)
+	userAvatarURL := getUserAvatarURL(userPubkeyHex)
+	userNpub, _ := encodeBech32Pubkey(userPubkeyHex)
+
+	// Render inline reply form
+	data := struct {
+		CSRFToken       string
+		ReplyTo         string
+		ReplyToPubkey   string
+		ReplyToKind     int
+		ReplyToRelay    string
+		ReplyToRoot     string
+		UserDisplayName string
+		UserAvatarURL   string
+		UserNpub        string
+		ShowGifButton   bool
+	}{
+		CSRFToken:       csrfToken,
+		ReplyTo:         eventID,
+		ReplyToPubkey:   pubkey,
+		ReplyToKind:     kind,
+		ReplyToRelay:    relay,
+		ReplyToRoot:     rootID,
+		UserDisplayName: userDisplayName,
+		UserAvatarURL:   userAvatarURL,
+		UserNpub:        userNpub,
+		ShowGifButton:   GiphyEnabled(),
+	}
+
+	var buf strings.Builder
+	if err := cachedInlineReplyForm.ExecuteTemplate(&buf, "inline-reply-form", data); err != nil {
+		slog.Error("error rendering inline reply form", "error", err)
+		util.RespondInternalError(w, "Failed to render form")
 		return
 	}
 

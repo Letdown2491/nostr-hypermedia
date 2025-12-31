@@ -217,6 +217,7 @@ var replyResponseTemplate = `{{define "reply-response"}}
   <input type="hidden" name="reply_to" value="{{.ReplyTo}}">
   <input type="hidden" name="reply_to_pubkey" value="{{.ReplyToPubkey}}">
   <input type="hidden" name="reply_to_kind" value="{{.ReplyToKind}}">
+  {{if .ReplyToRelay}}<input type="hidden" name="reply_to_relay" value="{{.ReplyToRelay}}">{{end}}
   {{if .ReplyToDTag}}<input type="hidden" name="reply_to_dtag" value="{{.ReplyToDTag}}">{{end}}
   <input type="hidden" name="reply_to_root" value="{{.ReplyToRoot}}">
   <input type="hidden" name="reply_count" value="{{.ReplyCount}}">
@@ -256,6 +257,71 @@ var replyResponseTemplate = `{{define "reply-response"}}
 </article>
 </div>
 <span id="reply-count" h-oob="outer">{{.ReplyCount}}</span>{{end}}
+{{end}}`
+
+// GetInlineReplyFormTemplate returns the inline reply form template for thread pages.
+func GetInlineReplyFormTemplate() string {
+	return inlineReplyFormTemplate
+}
+
+// inlineReplyFormTemplate renders an inline reply form that appears below a reply in thread view.
+// Similar to the main reply form but with unique IDs and targets the inline container.
+var inlineReplyFormTemplate = `{{define "inline-reply-form"}}
+<div class="reply-form-minimal inline-reply">
+  <div id="inline-reply-error-{{.ReplyTo}}" class="form-error" role="alert" aria-live="polite"></div>
+  <form method="POST" action="/reply" class="reply-form" id="inline-reply-form-{{.ReplyTo}}" h-post h-target="#inline-reply-{{.ReplyTo}}" h-swap="inner" h-indicator="#inline-reply-spinner-{{.ReplyTo}}" h-error-target="#inline-reply-error-{{.ReplyTo}}">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <input type="hidden" name="reply_to" value="{{.ReplyTo}}">
+    <input type="hidden" name="reply_to_pubkey" value="{{.ReplyToPubkey}}">
+    <input type="hidden" name="reply_to_kind" value="{{.ReplyToKind}}">
+    {{if .ReplyToRelay}}<input type="hidden" name="reply_to_relay" value="{{.ReplyToRelay}}">{{end}}
+    <input type="hidden" name="reply_to_root" value="{{.ReplyToRoot}}">
+    <input type="hidden" name="inline" value="1">
+    <input type="hidden" id="mentions-data-inline-{{.ReplyTo}}" name="mentions" value="{}">
+    <label for="inline-reply-content-{{.ReplyTo}}" class="sr-only">Write a reply</label>
+    <textarea id="inline-reply-content-{{.ReplyTo}}" name="content" placeholder="Write a reply..." autofocus></textarea>
+    <a href="{{buildURL "/mentions" "target" (print "inline-" .ReplyTo)}}" h-get h-target="#mentions-dropdown-inline-{{.ReplyTo}}" h-swap="inner" h-trigger="input debounce:300 from:#inline-reply-content-{{.ReplyTo}}" h-include="#inline-reply-content-{{.ReplyTo}}" hidden aria-hidden="true" aria-label="Mention autocomplete trigger"></a>
+    <div id="mentions-dropdown-inline-{{.ReplyTo}}" class="mentions-dropdown"></div>
+    <div id="gif-attachment-inline-{{.ReplyTo}}"></div>
+    <div class="reply-actions-minimal">
+      <button type="submit" class="btn-primary">{{i18n "btn.reply"}} <span id="inline-reply-spinner-{{.ReplyTo}}" class="h-indicator"><span class="h-spinner"></span></span></button>
+      {{if .ShowGifButton}}<a href="{{buildURL "/gifs" "target" (print "inline-" .ReplyTo)}}" h-get h-target="#gif-panel-inline-{{.ReplyTo}}" h-swap="inner" class="btn-primary" title="Add GIF">Add GIF</a>{{end}}
+      <details class="cw-dropdown">
+        <summary class="cw-toggle" title="{{i18n "label.content_warning"}}">⚠️</summary>
+        <div class="cw-options">
+          <select name="content_warning" class="cw-select" aria-label="{{i18n "label.content_warning"}}">
+            <option value="">{{i18n "option.no_warning"}}</option>
+            <option value="nsfw">NSFW</option>
+            <option value="spoiler">{{i18n "option.spoiler"}}</option>
+            <option value="sensitive">{{i18n "option.sensitive"}}</option>
+          </select>
+          <input type="text" name="content_warning_custom" class="cw-custom" placeholder="{{i18n "placeholder.custom_warning"}}">
+        </div>
+      </details>
+      <a href="/profile/{{.UserNpub}}" class="reply-avatar-link" title="{{.UserDisplayName}}" rel="author">
+        <img src="{{if .UserAvatarURL}}{{.UserAvatarURL}}{{else}}/static/avatar.jpg{{end}}" alt="Your avatar" class="reply-avatar" loading="lazy">
+      </a>
+    </div>
+  </form>
+  <div id="gif-panel-inline-{{.ReplyTo}}"></div>
+</div>
+{{end}}`
+
+// GetInlineReplyResponseTemplate returns the template for inline reply submission response.
+func GetInlineReplyResponseTemplate() string {
+	return inlineReplyResponseTemplate
+}
+
+// inlineReplyResponseTemplate renders the new reply in place of the inline form.
+// The form is replaced with the new reply article plus a placeholder for future inline replies.
+var inlineReplyResponseTemplate = `{{define "inline-reply-response"}}
+<article class="note reply reply-nested" id="reply-{{.NewReply.ID}}">
+  {{template "author-header" .NewReply}}
+  <div class="note-content">{{.NewReply.ContentHTML}}</div>
+  {{template "note-footer" .NewReply}}
+</article>
+<div id="inline-reply-{{.NewReply.ID}}" class="inline-reply-container"></div>
+<span id="reply-count" h-oob="outer">{{.ReplyCount}}</span>
 {{end}}`
 
 // postResponseTemplate returns the cleared post form plus the new note as OOB prepend.

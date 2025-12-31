@@ -177,7 +177,7 @@
 <body>
     <div class="container">
         <h1>HATEOAS Compliance Report</h1>
-        <p class="meta">Generated: 2025-12-24 12:12:02 | Templates analyzed: 58</p>
+        <p class="meta">Generated: 2025-12-25 00:25:09 | Templates analyzed: 59</p>
 
         <div class="score-card">
             <div class="score-circle" style="border-color: #22c55e; color: #22c55e;">
@@ -209,7 +209,7 @@
                 </div>
                 <p class="category-desc">Navigation links and semantic structure</p>
                 <p style="margin-top: 0.25rem; color: var(--text-muted); font-size: 0.8rem;">
-                    4 passed / 4 total checks
+                    5 passed / 5 total checks
                 </p>
             </div>
 
@@ -223,7 +223,7 @@
                 </div>
                 <p class="category-desc">Form methods, CSRF tokens, and submit buttons</p>
                 <p style="margin-top: 0.25rem; color: var(--text-muted); font-size: 0.8rem;">
-                    80 passed / 80 total checks
+                    84 passed / 84 total checks
                 </p>
             </div>
 
@@ -237,7 +237,7 @@
                 </div>
                 <p class="category-desc">Link accessibility and descriptive text</p>
                 <p style="margin-top: 0.25rem; color: var(--text-muted); font-size: 0.8rem;">
-                    104 passed / 104 total checks
+                    106 passed / 106 total checks
                 </p>
             </div>
 
@@ -251,7 +251,7 @@
                 </div>
                 <p class="category-desc">Page titles, labels, and self-documenting elements</p>
                 <p style="margin-top: 0.25rem; color: var(--text-muted); font-size: 0.8rem;">
-                    16 passed / 16 total checks
+                    17 passed / 17 total checks
                 </p>
             </div>
 
@@ -265,21 +265,21 @@
                 </div>
                 <p class="category-desc">State changes via HTML, not JavaScript</p>
                 <p style="margin-top: 0.25rem; color: var(--text-muted); font-size: 0.8rem;">
-                    54 passed / 54 total checks
+                    55 passed / 55 total checks
                 </p>
             </div>
 
             <div class="category-card">
                 <div class="category-header">
                     <span class="category-name">Accessibility</span>
-                    <span class="category-score" style="color: #22c55e">100%</span>
+                    <span class="category-score" style="color: #22c55e">98%</span>
                 </div>
                 <div class="progress-bar">
-                    <div class="progress-fill" style="width: 100%; background: #22c55e;"></div>
+                    <div class="progress-fill" style="width: 98%; background: #22c55e;"></div>
                 </div>
                 <p class="category-desc">Semantic HTML and accessibility attributes</p>
                 <p style="margin-top: 0.25rem; color: var(--text-muted); font-size: 0.8rem;">
-                    58 passed / 58 total checks
+                    59 passed / 60 total checks
                 </p>
             </div>
 
@@ -308,7 +308,7 @@
             <div class="template-header" onclick="this.parentElement.classList.toggle('open')">
                 <span class="template-name">Navigation</span>
                 <div class="template-stats">
-                    <span class="stat stat-pass">4 passed</span>
+                    <span class="stat stat-pass">5 passed</span>
                     <span class="stat stat-fail">0 failed</span>
                 </div>
             </div>
@@ -350,6 +350,15 @@
                     </div>
                 </div>
 
+                <div class="check-item">
+                    <div class="check-icon check-pass">✓</div>
+                    <div class="check-details">
+                        <div class="check-rule">Template contains navigation links</div>
+                        <div class="check-message">Found 1 navigation links</div>
+                        <div class="check-location">fragment.go</div>
+                    </div>
+                </div>
+
             </div>
         </div>
 
@@ -357,7 +366,7 @@
             <div class="template-header" onclick="this.parentElement.classList.toggle('open')">
                 <span class="template-name">Forms & Actions</span>
                 <div class="template-stats">
-                    <span class="stat stat-pass">80 passed</span>
+                    <span class="stat stat-pass">84 passed</span>
                     <span class="stat stat-fail">0 failed</span>
                 </div>
             </div>
@@ -619,6 +628,42 @@
                     <div class="check-icon check-pass">✓</div>
                     <div class="check-details">
                         <div class="check-rule">State-changing actions use POST</div>
+                        <div class="check-message">Form /reply uses POST</div>
+                        <div class="check-location">fragment.go:4</div>
+                    </div>
+                </div>
+
+                <div class="check-item">
+                    <div class="check-icon check-pass">✓</div>
+                    <div class="check-details">
+                        <div class="check-rule">POST forms include CSRF token</div>
+                        <div class="check-message">Form /reply has CSRF token</div>
+                        <div class="check-location">fragment.go:4</div>
+                    </div>
+                </div>
+
+                <div class="check-item">
+                    <div class="check-icon check-pass">✓</div>
+                    <div class="check-details">
+                        <div class="check-rule">No JavaScript event handlers</div>
+                        <div class="check-message">No inline JS handlers found</div>
+                        <div class="check-location">fragment.go</div>
+                    </div>
+                </div>
+
+                <div class="check-item">
+                    <div class="check-icon check-pass">✓</div>
+                    <div class="check-details">
+                        <div class="check-rule">Forms have submit buttons</div>
+                        <div class="check-message">Has submit button(s)</div>
+                        <div class="check-location">fragment.go</div>
+                    </div>
+                </div>
+
+                <div class="check-item">
+                    <div class="check-icon check-pass">✓</div>
+                    <div class="check-details">
+                        <div class="check-rule">State-changing actions use POST</div>
                         <div class="check-message">Form /post uses POST</div>
                         <div class="check-location">fragment.go:2</div>
                     </div>
@@ -692,7 +737,7 @@
                     <div class="check-details">
                         <div class="check-rule">POST forms include CSRF token</div>
                         <div class="check-message">Form placeholder has CSRF token</div>
-                        <div class="check-location">partials.go:42</div>
+                        <div class="check-location">partials.go:46</div>
                     </div>
                 </div>
 
@@ -701,7 +746,7 @@
                     <div class="check-details">
                         <div class="check-rule">POST forms include CSRF token</div>
                         <div class="check-message">Form placeholder has CSRF token</div>
-                        <div class="check-location">partials.go:42</div>
+                        <div class="check-location">partials.go:46</div>
                     </div>
                 </div>
 
@@ -710,7 +755,7 @@
                     <div class="check-details">
                         <div class="check-rule">POST forms include CSRF token</div>
                         <div class="check-message">Form placeholder has CSRF token</div>
-                        <div class="check-location">partials.go:42</div>
+                        <div class="check-location">partials.go:46</div>
                     </div>
                 </div>
 
@@ -719,7 +764,7 @@
                     <div class="check-details">
                         <div class="check-rule">POST forms include CSRF token</div>
                         <div class="check-message">Form placeholder has CSRF token</div>
-                        <div class="check-location">partials.go:42</div>
+                        <div class="check-location">partials.go:46</div>
                     </div>
                 </div>
 
@@ -728,7 +773,7 @@
                     <div class="check-details">
                         <div class="check-rule">POST forms include CSRF token</div>
                         <div class="check-message">Form placeholder has CSRF token</div>
-                        <div class="check-location">partials.go:42</div>
+                        <div class="check-location">partials.go:46</div>
                     </div>
                 </div>
 
@@ -1090,7 +1135,7 @@
             <div class="template-header" onclick="this.parentElement.classList.toggle('open')">
                 <span class="template-name">Links</span>
                 <div class="template-stats">
-                    <span class="stat stat-pass">104 passed</span>
+                    <span class="stat stat-pass">106 passed</span>
                     <span class="stat stat-fail">0 failed</span>
                 </div>
             </div>
@@ -1335,6 +1380,24 @@
                     <div class="check-details">
                         <div class="check-rule">Links have accessible content</div>
                         <div class="check-message">0 empty links found</div>
+                        <div class="check-location">fragment.go</div>
+                    </div>
+                </div>
+
+                <div class="check-item">
+                    <div class="check-icon check-pass">✓</div>
+                    <div class="check-details">
+                        <div class="check-rule">Links have descriptive text</div>
+                        <div class="check-message">Link text is descriptive</div>
+                        <div class="check-location">fragment.go</div>
+                    </div>
+                </div>
+
+                <div class="check-item">
+                    <div class="check-icon check-pass">✓</div>
+                    <div class="check-details">
+                        <div class="check-rule">Links have descriptive text</div>
+                        <div class="check-message">Link text is descriptive</div>
                         <div class="check-location">gifs.go</div>
                     </div>
                 </div>
@@ -1360,8 +1423,8 @@
                 <div class="check-item">
                     <div class="check-icon check-pass">✓</div>
                     <div class="check-details">
-                        <div class="check-rule">Links have descriptive text</div>
-                        <div class="check-message">Link text is descriptive</div>
+                        <div class="check-rule">Links have accessible content</div>
+                        <div class="check-message">0 empty links found</div>
                         <div class="check-location">gifs.go</div>
                     </div>
                 </div>
@@ -1459,8 +1522,8 @@
                 <div class="check-item">
                     <div class="check-icon check-pass">✓</div>
                     <div class="check-details">
-                        <div class="check-rule">Links have accessible content</div>
-                        <div class="check-message">0 empty links found</div>
+                        <div class="check-rule">Links have descriptive text</div>
+                        <div class="check-message">Link text is descriptive</div>
                         <div class="check-location">comment.go</div>
                     </div>
                 </div>
@@ -1468,8 +1531,8 @@
                 <div class="check-item">
                     <div class="check-icon check-pass">✓</div>
                     <div class="check-details">
-                        <div class="check-rule">Links have descriptive text</div>
-                        <div class="check-message">Link text is descriptive</div>
+                        <div class="check-rule">Links have accessible content</div>
+                        <div class="check-message">0 empty links found</div>
                         <div class="check-location">comment.go</div>
                     </div>
                 </div>
@@ -1585,8 +1648,8 @@
                 <div class="check-item">
                     <div class="check-icon check-pass">✓</div>
                     <div class="check-details">
-                        <div class="check-rule">Links have accessible content</div>
-                        <div class="check-message">0 empty links found</div>
+                        <div class="check-rule">Links have descriptive text</div>
+                        <div class="check-message">Link text is descriptive</div>
                         <div class="check-location">livestream.go</div>
                     </div>
                 </div>
@@ -1594,8 +1657,8 @@
                 <div class="check-item">
                     <div class="check-icon check-pass">✓</div>
                     <div class="check-details">
-                        <div class="check-rule">Links have descriptive text</div>
-                        <div class="check-message">Link text is descriptive</div>
+                        <div class="check-rule">Links have accessible content</div>
+                        <div class="check-message">0 empty links found</div>
                         <div class="check-location">livestream.go</div>
                     </div>
                 </div>
@@ -1630,15 +1693,6 @@
                 <div class="check-item">
                     <div class="check-icon check-pass">✓</div>
                     <div class="check-details">
-                        <div class="check-rule">Links have accessible content</div>
-                        <div class="check-message">0 empty links found</div>
-                        <div class="check-location">partials.go</div>
-                    </div>
-                </div>
-
-                <div class="check-item">
-                    <div class="check-icon check-pass">✓</div>
-                    <div class="check-details">
                         <div class="check-rule">Links have descriptive text</div>
                         <div class="check-message">Link text is descriptive</div>
                         <div class="check-location">partials.go</div>
@@ -1693,8 +1747,17 @@
                 <div class="check-item">
                     <div class="check-icon check-pass">✓</div>
                     <div class="check-details">
-                        <div class="check-rule">Links have descriptive text</div>
-                        <div class="check-message">Link text is descriptive</div>
+                        <div class="check-rule">Links have accessible content</div>
+                        <div class="check-message">0 empty links found</div>
+                        <div class="check-location">partials.go</div>
+                    </div>
+                </div>
+
+                <div class="check-item">
+                    <div class="check-icon check-pass">✓</div>
+                    <div class="check-details">
+                        <div class="check-rule">Links have accessible content</div>
+                        <div class="check-message">0 empty links found</div>
                         <div class="check-location">recommendation.go</div>
                     </div>
                 </div>
@@ -1702,8 +1765,8 @@
                 <div class="check-item">
                     <div class="check-icon check-pass">✓</div>
                     <div class="check-details">
-                        <div class="check-rule">Links have accessible content</div>
-                        <div class="check-message">0 empty links found</div>
+                        <div class="check-rule">Links have descriptive text</div>
+                        <div class="check-message">Link text is descriptive</div>
                         <div class="check-location">recommendation.go</div>
                     </div>
                 </div>
@@ -1729,8 +1792,8 @@
                 <div class="check-item">
                     <div class="check-icon check-pass">✓</div>
                     <div class="check-details">
-                        <div class="check-rule">Links have accessible content</div>
-                        <div class="check-message">0 empty links found</div>
+                        <div class="check-rule">Links have descriptive text</div>
+                        <div class="check-message">Link text is descriptive</div>
                         <div class="check-location">repost.go</div>
                     </div>
                 </div>
@@ -1738,8 +1801,8 @@
                 <div class="check-item">
                     <div class="check-icon check-pass">✓</div>
                     <div class="check-details">
-                        <div class="check-rule">Links have descriptive text</div>
-                        <div class="check-message">Link text is descriptive</div>
+                        <div class="check-rule">Links have accessible content</div>
+                        <div class="check-message">0 empty links found</div>
                         <div class="check-location">repost.go</div>
                     </div>
                 </div>
@@ -1765,8 +1828,8 @@
                 <div class="check-item">
                     <div class="check-icon check-pass">✓</div>
                     <div class="check-details">
-                        <div class="check-rule">Links have accessible content</div>
-                        <div class="check-message">0 empty links found</div>
+                        <div class="check-rule">Links have descriptive text</div>
+                        <div class="check-message">Link text is descriptive</div>
                         <div class="check-location">status.go</div>
                     </div>
                 </div>
@@ -1774,8 +1837,8 @@
                 <div class="check-item">
                     <div class="check-icon check-pass">✓</div>
                     <div class="check-details">
-                        <div class="check-rule">Links have descriptive text</div>
-                        <div class="check-message">Link text is descriptive</div>
+                        <div class="check-rule">Links have accessible content</div>
+                        <div class="check-message">0 empty links found</div>
                         <div class="check-location">status.go</div>
                     </div>
                 </div>
@@ -1819,6 +1882,24 @@
                 <div class="check-item">
                     <div class="check-icon check-pass">✓</div>
                     <div class="check-details">
+                        <div class="check-rule">Links have accessible content</div>
+                        <div class="check-message">0 empty links found</div>
+                        <div class="check-location">login.go</div>
+                    </div>
+                </div>
+
+                <div class="check-item">
+                    <div class="check-icon check-pass">✓</div>
+                    <div class="check-details">
+                        <div class="check-rule">Links have descriptive text</div>
+                        <div class="check-message">Link text is descriptive</div>
+                        <div class="check-location">login.go</div>
+                    </div>
+                </div>
+
+                <div class="check-item">
+                    <div class="check-icon check-pass">✓</div>
+                    <div class="check-details">
                         <div class="check-rule">External links have rel=&#39;external noopener&#39;</div>
                         <div class="check-message">2/2 external links have proper rel attribute</div>
                         <div class="check-location">login.go</div>
@@ -1828,26 +1909,8 @@
                 <div class="check-item">
                     <div class="check-icon check-pass">✓</div>
                     <div class="check-details">
-                        <div class="check-rule">Links have descriptive text</div>
-                        <div class="check-message">Link text is descriptive</div>
-                        <div class="check-location">login.go</div>
-                    </div>
-                </div>
-
-                <div class="check-item">
-                    <div class="check-icon check-pass">✓</div>
-                    <div class="check-details">
                         <div class="check-rule">Links have accessible content</div>
                         <div class="check-message">0 empty links found</div>
-                        <div class="check-location">login.go</div>
-                    </div>
-                </div>
-
-                <div class="check-item">
-                    <div class="check-icon check-pass">✓</div>
-                    <div class="check-details">
-                        <div class="check-rule">Links have descriptive text</div>
-                        <div class="check-message">Link text is descriptive</div>
                         <div class="check-location">mentions.go</div>
                     </div>
                 </div>
@@ -1855,8 +1918,8 @@
                 <div class="check-item">
                     <div class="check-icon check-pass">✓</div>
                     <div class="check-details">
-                        <div class="check-rule">Links have accessible content</div>
-                        <div class="check-message">0 empty links found</div>
+                        <div class="check-rule">Links have descriptive text</div>
+                        <div class="check-message">Link text is descriptive</div>
                         <div class="check-location">mentions.go</div>
                     </div>
                 </div>
@@ -1900,8 +1963,8 @@
                 <div class="check-item">
                     <div class="check-icon check-pass">✓</div>
                     <div class="check-details">
-                        <div class="check-rule">Links have accessible content</div>
-                        <div class="check-message">0 empty links found</div>
+                        <div class="check-rule">Links have descriptive text</div>
+                        <div class="check-message">Link text is descriptive</div>
                         <div class="check-location">profile.go</div>
                     </div>
                 </div>
@@ -1909,8 +1972,8 @@
                 <div class="check-item">
                     <div class="check-icon check-pass">✓</div>
                     <div class="check-details">
-                        <div class="check-rule">Links have descriptive text</div>
-                        <div class="check-message">Link text is descriptive</div>
+                        <div class="check-rule">Links have accessible content</div>
+                        <div class="check-message">0 empty links found</div>
                         <div class="check-location">profile.go</div>
                     </div>
                 </div>
@@ -1954,8 +2017,8 @@
                 <div class="check-item">
                     <div class="check-icon check-pass">✓</div>
                     <div class="check-details">
-                        <div class="check-rule">Links have descriptive text</div>
-                        <div class="check-message">Link text is descriptive</div>
+                        <div class="check-rule">Links have accessible content</div>
+                        <div class="check-message">0 empty links found</div>
                         <div class="check-location">search.go</div>
                     </div>
                 </div>
@@ -1963,8 +2026,8 @@
                 <div class="check-item">
                     <div class="check-icon check-pass">✓</div>
                     <div class="check-details">
-                        <div class="check-rule">Links have accessible content</div>
-                        <div class="check-message">0 empty links found</div>
+                        <div class="check-rule">Links have descriptive text</div>
+                        <div class="check-message">Link text is descriptive</div>
                         <div class="check-location">search.go</div>
                     </div>
                 </div>
@@ -1990,15 +2053,6 @@
                 <div class="check-item">
                     <div class="check-icon check-pass">✓</div>
                     <div class="check-details">
-                        <div class="check-rule">Links have accessible content</div>
-                        <div class="check-message">0 empty links found</div>
-                        <div class="check-location">timeline.go</div>
-                    </div>
-                </div>
-
-                <div class="check-item">
-                    <div class="check-icon check-pass">✓</div>
-                    <div class="check-details">
                         <div class="check-rule">Links have descriptive text</div>
                         <div class="check-message">Link text is descriptive</div>
                         <div class="check-location">timeline.go</div>
@@ -2010,16 +2064,7 @@
                     <div class="check-details">
                         <div class="check-rule">Links have accessible content</div>
                         <div class="check-message">0 empty links found</div>
-                        <div class="check-location">wallet.go</div>
-                    </div>
-                </div>
-
-                <div class="check-item">
-                    <div class="check-icon check-pass">✓</div>
-                    <div class="check-details">
-                        <div class="check-rule">Links have descriptive text</div>
-                        <div class="check-message">Link text is descriptive</div>
-                        <div class="check-location">wallet.go</div>
+                        <div class="check-location">timeline.go</div>
                     </div>
                 </div>
 
@@ -2028,6 +2073,24 @@
                     <div class="check-details">
                         <div class="check-rule">External links have rel=&#39;external noopener&#39;</div>
                         <div class="check-message">2/2 external links have proper rel attribute</div>
+                        <div class="check-location">wallet.go</div>
+                    </div>
+                </div>
+
+                <div class="check-item">
+                    <div class="check-icon check-pass">✓</div>
+                    <div class="check-details">
+                        <div class="check-rule">Links have descriptive text</div>
+                        <div class="check-message">Link text is descriptive</div>
+                        <div class="check-location">wallet.go</div>
+                    </div>
+                </div>
+
+                <div class="check-item">
+                    <div class="check-icon check-pass">✓</div>
+                    <div class="check-details">
+                        <div class="check-rule">Links have accessible content</div>
+                        <div class="check-message">0 empty links found</div>
                         <div class="check-location">wallet.go</div>
                     </div>
                 </div>
@@ -2039,7 +2102,7 @@
             <div class="template-header" onclick="this.parentElement.classList.toggle('open')">
                 <span class="template-name">Self-Describing</span>
                 <div class="template-stats">
-                    <span class="stat stat-pass">16 passed</span>
+                    <span class="stat stat-pass">17 passed</span>
                     <span class="stat stat-fail">0 failed</span>
                 </div>
             </div>
@@ -2069,6 +2132,15 @@
                         <div class="check-rule">Form inputs have labels or placeholders</div>
                         <div class="check-message">1/1 inputs have accessible names</div>
                         <div class="check-location">compose.go</div>
+                    </div>
+                </div>
+
+                <div class="check-item">
+                    <div class="check-icon check-pass">✓</div>
+                    <div class="check-details">
+                        <div class="check-rule">Form inputs have labels or placeholders</div>
+                        <div class="check-message">3/3 inputs have accessible names</div>
+                        <div class="check-location">fragment.go</div>
                     </div>
                 </div>
 
@@ -2196,7 +2268,7 @@
             <div class="template-header" onclick="this.parentElement.classList.toggle('open')">
                 <span class="template-name">State Transfer</span>
                 <div class="template-stats">
-                    <span class="stat stat-pass">54 passed</span>
+                    <span class="stat stat-pass">55 passed</span>
                     <span class="stat stat-fail">0 failed</span>
                 </div>
             </div>
@@ -2351,6 +2423,15 @@
                     <div class="check-details">
                         <div class="check-rule">HTML pages don&#39;t reference JSON APIs</div>
                         <div class="check-message">No JSON API references</div>
+                        <div class="check-location">fragment.go</div>
+                    </div>
+                </div>
+
+                <div class="check-item">
+                    <div class="check-icon check-pass">✓</div>
+                    <div class="check-details">
+                        <div class="check-rule">HTML pages don&#39;t reference JSON APIs</div>
+                        <div class="check-message">No JSON API references</div>
                         <div class="check-location">gifs.go</div>
                     </div>
                 </div>
@@ -2691,22 +2772,22 @@
             </div>
         </div>
 
-        <div class="template-section">
+        <div class="template-section open">
             <div class="template-header" onclick="this.parentElement.classList.toggle('open')">
                 <span class="template-name">Accessibility</span>
                 <div class="template-stats">
-                    <span class="stat stat-pass">58 passed</span>
-                    <span class="stat stat-fail">0 failed</span>
+                    <span class="stat stat-pass">59 passed</span>
+                    <span class="stat stat-fail">1 failed</span>
                 </div>
             </div>
             <div class="checks-list">
 
                 <div class="check-item">
-                    <div class="check-icon check-pass">✓</div>
+                    <div class="check-icon check-fail">✗</div>
                     <div class="check-details">
-                        <div class="check-rule">Images have alt attributes</div>
-                        <div class="check-message">1/1 images have alt text</div>
-                        <div class="check-location">base.go</div>
+                        <div class="check-rule">Uses semantic HTML elements</div>
+                        <div class="check-message">Found 0 semantic elements</div>
+                        <div class="check-location">fragment.go</div>
                     </div>
                 </div>
 
@@ -2742,6 +2823,15 @@
                     <div class="check-details">
                         <div class="check-rule">Images have alt attributes</div>
                         <div class="check-message">1/1 images have alt text</div>
+                        <div class="check-location">base.go</div>
+                    </div>
+                </div>
+
+                <div class="check-item">
+                    <div class="check-icon check-pass">✓</div>
+                    <div class="check-details">
+                        <div class="check-rule">Images have alt attributes</div>
+                        <div class="check-message">1/1 images have alt text</div>
                         <div class="check-location">compose.go</div>
                     </div>
                 </div>
@@ -2752,6 +2842,42 @@
                         <div class="check-rule">Uses semantic HTML elements</div>
                         <div class="check-message">Found 0 semantic elements</div>
                         <div class="check-location">compose.go</div>
+                    </div>
+                </div>
+
+                <div class="check-item">
+                    <div class="check-icon check-pass">✓</div>
+                    <div class="check-details">
+                        <div class="check-rule">Uses semantic HTML elements</div>
+                        <div class="check-message">Found 0 semantic elements</div>
+                        <div class="check-location">fragment.go</div>
+                    </div>
+                </div>
+
+                <div class="check-item">
+                    <div class="check-icon check-pass">✓</div>
+                    <div class="check-details">
+                        <div class="check-rule">Uses semantic HTML elements</div>
+                        <div class="check-message">Found 0 semantic elements</div>
+                        <div class="check-location">fragment.go</div>
+                    </div>
+                </div>
+
+                <div class="check-item">
+                    <div class="check-icon check-pass">✓</div>
+                    <div class="check-details">
+                        <div class="check-rule">Images have alt attributes</div>
+                        <div class="check-message">1/1 images have alt text</div>
+                        <div class="check-location">fragment.go</div>
+                    </div>
+                </div>
+
+                <div class="check-item">
+                    <div class="check-icon check-pass">✓</div>
+                    <div class="check-details">
+                        <div class="check-rule">Uses semantic HTML elements</div>
+                        <div class="check-message">Found 1 semantic elements</div>
+                        <div class="check-location">fragment.go</div>
                     </div>
                 </div>
 
@@ -2794,54 +2920,9 @@
                 <div class="check-item">
                     <div class="check-icon check-pass">✓</div>
                     <div class="check-details">
-                        <div class="check-rule">Uses semantic HTML elements</div>
-                        <div class="check-message">Found 1 semantic elements</div>
-                        <div class="check-location">fragment.go</div>
-                    </div>
-                </div>
-
-                <div class="check-item">
-                    <div class="check-icon check-pass">✓</div>
-                    <div class="check-details">
-                        <div class="check-rule">Uses semantic HTML elements</div>
-                        <div class="check-message">Found 0 semantic elements</div>
-                        <div class="check-location">fragment.go</div>
-                    </div>
-                </div>
-
-                <div class="check-item">
-                    <div class="check-icon check-pass">✓</div>
-                    <div class="check-details">
-                        <div class="check-rule">Uses semantic HTML elements</div>
-                        <div class="check-message">Found 0 semantic elements</div>
-                        <div class="check-location">fragment.go</div>
-                    </div>
-                </div>
-
-                <div class="check-item">
-                    <div class="check-icon check-pass">✓</div>
-                    <div class="check-details">
                         <div class="check-rule">Images have alt attributes</div>
                         <div class="check-message">1/1 images have alt text</div>
                         <div class="check-location">fragment.go</div>
-                    </div>
-                </div>
-
-                <div class="check-item">
-                    <div class="check-icon check-pass">✓</div>
-                    <div class="check-details">
-                        <div class="check-rule">Images have alt attributes</div>
-                        <div class="check-message">1/1 images have alt text</div>
-                        <div class="check-location">gifs.go</div>
-                    </div>
-                </div>
-
-                <div class="check-item">
-                    <div class="check-icon check-pass">✓</div>
-                    <div class="check-details">
-                        <div class="check-rule">Uses semantic HTML elements</div>
-                        <div class="check-message">Found 0 semantic elements</div>
-                        <div class="check-location">gifs.go</div>
                     </div>
                 </div>
 
@@ -2850,6 +2931,24 @@
                     <div class="check-details">
                         <div class="check-rule">Uses semantic HTML elements</div>
                         <div class="check-message">Found 3 semantic elements</div>
+                        <div class="check-location">gifs.go</div>
+                    </div>
+                </div>
+
+                <div class="check-item">
+                    <div class="check-icon check-pass">✓</div>
+                    <div class="check-details">
+                        <div class="check-rule">Uses semantic HTML elements</div>
+                        <div class="check-message">Found 0 semantic elements</div>
+                        <div class="check-location">gifs.go</div>
+                    </div>
+                </div>
+
+                <div class="check-item">
+                    <div class="check-icon check-pass">✓</div>
+                    <div class="check-details">
+                        <div class="check-rule">Images have alt attributes</div>
+                        <div class="check-message">1/1 images have alt text</div>
                         <div class="check-location">gifs.go</div>
                     </div>
                 </div>
@@ -2992,8 +3091,17 @@
                 <div class="check-item">
                     <div class="check-icon check-pass">✓</div>
                     <div class="check-details">
+                        <div class="check-rule">Uses semantic HTML elements</div>
+                        <div class="check-message">Found 0 semantic elements</div>
+                        <div class="check-location">partials.go</div>
+                    </div>
+                </div>
+
+                <div class="check-item">
+                    <div class="check-icon check-pass">✓</div>
+                    <div class="check-details">
                         <div class="check-rule">Images have alt attributes</div>
-                        <div class="check-message">2/2 images have alt text</div>
+                        <div class="check-message">1/1 images have alt text</div>
                         <div class="check-location">partials.go</div>
                     </div>
                 </div>
@@ -3010,17 +3118,8 @@
                 <div class="check-item">
                     <div class="check-icon check-pass">✓</div>
                     <div class="check-details">
-                        <div class="check-rule">Uses semantic HTML elements</div>
-                        <div class="check-message">Found 0 semantic elements</div>
-                        <div class="check-location">partials.go</div>
-                    </div>
-                </div>
-
-                <div class="check-item">
-                    <div class="check-icon check-pass">✓</div>
-                    <div class="check-details">
                         <div class="check-rule">Images have alt attributes</div>
-                        <div class="check-message">1/1 images have alt text</div>
+                        <div class="check-message">2/2 images have alt text</div>
                         <div class="check-location">partials.go</div>
                     </div>
                 </div>
@@ -3136,8 +3235,8 @@
                 <div class="check-item">
                     <div class="check-icon check-pass">✓</div>
                     <div class="check-details">
-                        <div class="check-rule">Images have alt attributes</div>
-                        <div class="check-message">2/2 images have alt text</div>
+                        <div class="check-rule">Uses semantic HTML elements</div>
+                        <div class="check-message">Found 0 semantic elements</div>
                         <div class="check-location">quote.go</div>
                     </div>
                 </div>
@@ -3145,8 +3244,8 @@
                 <div class="check-item">
                     <div class="check-icon check-pass">✓</div>
                     <div class="check-details">
-                        <div class="check-rule">Uses semantic HTML elements</div>
-                        <div class="check-message">Found 0 semantic elements</div>
+                        <div class="check-rule">Images have alt attributes</div>
+                        <div class="check-message">2/2 images have alt text</div>
                         <div class="check-location">quote.go</div>
                     </div>
                 </div>
@@ -3181,8 +3280,8 @@
                 <div class="check-item">
                     <div class="check-icon check-pass">✓</div>
                     <div class="check-details">
-                        <div class="check-rule">Images have alt attributes</div>
-                        <div class="check-message">3/3 images have alt text</div>
+                        <div class="check-rule">Uses semantic HTML elements</div>
+                        <div class="check-message">Found 3 semantic elements</div>
                         <div class="check-location">thread.go</div>
                     </div>
                 </div>
@@ -3190,8 +3289,8 @@
                 <div class="check-item">
                     <div class="check-icon check-pass">✓</div>
                     <div class="check-details">
-                        <div class="check-rule">Uses semantic HTML elements</div>
-                        <div class="check-message">Found 3 semantic elements</div>
+                        <div class="check-rule">Images have alt attributes</div>
+                        <div class="check-message">3/3 images have alt text</div>
                         <div class="check-location">thread.go</div>
                     </div>
                 </div>

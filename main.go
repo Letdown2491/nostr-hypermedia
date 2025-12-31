@@ -280,6 +280,7 @@ func main() {
 	http.HandleFunc("/logout", securityHeaders(htmlLogoutHandler))
 	http.HandleFunc("/post", securityHeaders(limitBody(htmlPostNoteHandler, maxBodySize)))
 	http.HandleFunc("/reply", securityHeaders(limitBody(htmlReplyHandler, maxBodySize)))
+	http.HandleFunc("/inline-reply-form", gzipMiddleware(securityHeaders(htmlInlineReplyFormHandler)))
 	http.HandleFunc("/react", securityHeaders(limitBody(htmlReactHandler, maxBodySize)))
 	http.HandleFunc("/zap", securityHeaders(limitBody(htmlZapHandler, maxBodySize)))
 	http.HandleFunc("/bookmark", securityHeaders(limitBody(htmlBookmarkHandler, maxBodySize)))
